@@ -1,13 +1,36 @@
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#define SAMPLE_RATE 44100
 #define NEW(target, size) target = malloc((size) * sizeof *target)
 #define RESIZE(target, size) target = realloc(target, (size) * sizeof *target)
+
+typedef double (* osc_fun)(double);
+
+double square(double i) {
+  return 2*(floor(sin(i)) + 0.5);
+}
+
+double saw(double i) {
+  i *= .25;
+  return (2 * (i - trunc(i))) - 1;
+}
+
+double triangle(double i) {
+  return (2 * fabs(saw(i))) - 1;
+}
 
 struct tunebook_number {
   enum { NUMBER_RATIONAL, NUMBER_EXPONENTIAL } type;
   int numerator, denominator;
+};
+
+struct tunebook_chord {
+  int n_notes;
+  struct tunebook_number *notes;
 };
 
 struct tunebook_token {
@@ -58,14 +81,14 @@ struct tunebook_instrument {
 struct tunebook_oscillator {
   char *name;
   enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE } shape;
-  struct tunebook_number attack, decay, sustain, release, volume, hz, detune;
+  double attack, decay, sustain, release, volume, hz, detune;
   int n_am_targets, n_fm_targets, n_add_targets, n_sub_targets;
   char **am_targets, **fm_targets, **add_targets, **sub_targets;
 };
 
 struct tunebook_song {
   char *name;
-  struct tunebook_number tempo, root;
+  double tempo, root;
   int n_voices;
   struct tunebook_voice *voices;
 };
@@ -84,6 +107,7 @@ struct tunebook_voice {
 
 struct tunebook_voice_command {
   enum {
+    VOICE_COMMAND_BASE,
     VOICE_COMMAND_NOTE,
     VOICE_COMMAND_MODULATE,
     VOICE_COMMAND_GROOVE,
@@ -93,11 +117,8 @@ struct tunebook_voice_command {
     VOICE_COMMAND_REST,
   } type;
   union {
-    struct tunebook_number note, modulate, repeat;
-    struct {
-      int n_notes;
-      struct tunebook_number *notes;
-    } groove, chord;
+    struct tunebook_number base, note, modulate, repeat;
+    struct tunebook_chord groove, chord;
   } as;
 };
 
@@ -113,6 +134,12 @@ struct tunebook_error {
   } type;
   struct tunebook_token last_token;
 };
+
+double number_to_double(double base, struct tunebook_number coeffecient) {
+  double c = (double)coeffecient.numerator / coeffecient.denominator;
+  if (coeffecient.type == NUMBER_EXPONENTIAL) return pow(base, c);
+  else return base * c;
+}
 
 void tunebook_print_error(struct tunebook_error error) {
   fprintf(stderr, "uh oh stinky: %i %i\n", error.type, error.last_token.type);
@@ -214,8 +241,10 @@ int tunebook_next_token
   else if (!strcmp(buffer, "root")) token->type = TOKEN_ROOT;
   else if (!strcmp(buffer, "saw")) token->type = TOKEN_SAW;
   else if (!strcmp(buffer, "section")) token->type = TOKEN_SECTION;
+  else if (!strcmp(buffer, "sin")) token->type = TOKEN_SINE;
   else if (!strcmp(buffer, "sine")) token->type = TOKEN_SINE;
   else if (!strcmp(buffer, "song")) token->type = TOKEN_SONG;
+  else if (!strcmp(buffer, "sqr")) token->type = TOKEN_SQUARE;
   else if (!strcmp(buffer, "square")) token->type = TOKEN_SQUARE;
   else if (!strcmp(buffer, "sub")) token->type = TOKEN_SUB;
   else if (!strcmp(buffer, "sustain")) token->type = TOKEN_SUSTAIN;
@@ -267,6 +296,14 @@ int tunebook_read_file
       INSTRUMENT.n_oscillators = 0;
       NEW(INSTRUMENT.oscillators, s_oscillators);
       break;
+    case TOKEN_BASE:
+      if (++VOICE.n_commands >= s_commands) {
+	s_commands *= 2;
+	RESIZE(VOICE.commands, s_commands);
+      }
+      COMMAND.type = VOICE_COMMAND_BASE;
+      COMMAND.as.base = token.as.number;
+      break;
     case TOKEN_SQUARE:
       shape = OSC_SQUARE;
       goto oscillator;
@@ -302,13 +339,13 @@ int tunebook_read_file
       NEW(OSCILLATOR.add_targets, s_add_targets);
       NEW(OSCILLATOR.sub_targets, s_sub_targets);
       OSCILLATOR.shape = shape;
-      OSCILLATOR.attack = (struct tunebook_number){ NUMBER_RATIONAL, 1, 32 };
-      OSCILLATOR.decay = (struct tunebook_number){ NUMBER_RATIONAL, 1, 3 };
-      OSCILLATOR.sustain = (struct tunebook_number){ NUMBER_RATIONAL, 3, 4 };
-      OSCILLATOR.release = (struct tunebook_number){ NUMBER_RATIONAL, 1, 32 };
-      OSCILLATOR.volume = (struct tunebook_number){ NUMBER_RATIONAL, 1, 2 };
-      OSCILLATOR.hz = (struct tunebook_number){ NUMBER_RATIONAL, 0, 0 };
-      OSCILLATOR.detune = (struct tunebook_number){ NUMBER_RATIONAL, 1, 1 };
+      OSCILLATOR.attack = 1.0/32.0;
+      OSCILLATOR.decay = 1.0/3.0;
+      OSCILLATOR.sustain = 3.0/4.0;
+      OSCILLATOR.release = 1.0/32.0;
+      OSCILLATOR.volume = 1.0/2.0;
+      OSCILLATOR.hz = 0;
+      OSCILLATOR.detune = 1;
       break;
     case TOKEN_DETUNE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -316,7 +353,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.detune = token.as.number;
+      OSCILLATOR.detune = number_to_double(1, token.as.number);
       break;
     case TOKEN_HZ:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -324,7 +361,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.hz = token.as.number;
+      OSCILLATOR.hz = number_to_double(1, token.as.number);
       break;
     case TOKEN_ATTACK:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -332,7 +369,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.attack = token.as.number;
+      OSCILLATOR.attack = number_to_double(1, token.as.number);
       break;
     case TOKEN_DECAY:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -340,7 +377,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.decay = token.as.number;
+      OSCILLATOR.decay = number_to_double(1, token.as.number);
       break;
     case TOKEN_SUSTAIN:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -348,7 +385,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.sustain = token.as.number;
+      OSCILLATOR.sustain = number_to_double(1, token.as.number);
       break;
     case TOKEN_RELEASE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -356,7 +393,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.release = token.as.number;
+      OSCILLATOR.release = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOLUME:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -364,7 +401,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.volume = token.as.number;
+      OSCILLATOR.volume = number_to_double(1, token.as.number);
       break;
     case TOKEN_AM:
       if (++OSCILLATOR.n_am_targets >= s_am_targets) {
@@ -474,8 +511,8 @@ int tunebook_read_file
       }
       s_voices = 8;
       SONG.name = token.as.string;
-      SONG.tempo = (struct tunebook_number){ NUMBER_RATIONAL, 60, 1 };
-      SONG.root = (struct tunebook_number){ NUMBER_RATIONAL, 440, 1 };
+      SONG.tempo = 60;
+      SONG.root = 440;
       SONG.n_voices = 0;
       NEW(SONG.voices, s_voices);
       break;
@@ -485,7 +522,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      SONG.tempo = token.as.number;
+      SONG.tempo = number_to_double(1, token.as.number);
       break;
     case TOKEN_ROOT:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -493,7 +530,7 @@ int tunebook_read_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      SONG.root = token.as.number;
+      SONG.root = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOICE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -513,8 +550,8 @@ int tunebook_read_file
     case TOKEN_GROOVE:
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
-	  RESIZE(VOICE.commands, s_commands);
-	}
+	RESIZE(VOICE.commands, s_commands);
+      }
       s_notes = 4;
       COMMAND.type = VOICE_COMMAND_GROOVE;
       COMMAND.as.groove.n_notes = 0;
@@ -612,21 +649,121 @@ int tunebook_read_file
   return -1;
 }
 
-int tunebook_write_song
-(struct tunebook_song song, FILE *out, struct tunebook_error *error) {
+void write_note() {
 }
 
 int tunebook_write_book
-(struct tunebook_book book, struct tunebook_error *error) {
+(struct tunebook_book *book, struct tunebook_error *error) {
+  int16_t sample;
+  int n_filename, beat, length, o;
+  char *filename;
+  struct tunebook_song *song;
+  struct tunebook_voice *voice;
+  struct tunebook_instrument *instrument;
+  struct tunebook_voice_command *command;
+  struct tunebook_chord *groove;
+  double tempo = 60, root = 440, base = 2;
+  FILE *out_file;
+  osc_fun f;
+  for (int s = 0 ; s < book->n_songs; ++s) {
+    song = &book->songs[s];
+    n_filename = 4 + strlen(song->name);
+    filename = malloc(n_filename);
+    strcpy(filename, song->name);
+    strcpy(filename + n_filename - 4, ".l16");
+    out_file = fopen(filename, "w+");
+    for (int v = 0; v < song->n_voices; ++v) {
+      groove = NULL;
+      tempo = song->tempo;
+      root = song->root;
+      voice = &song->voices[v];
+      fseek(out_file, 0, SEEK_SET);
+      o = beat = 0;
+      for (int i = 0; i < book->n_instruments; ++i) {
+	instrument = &book->instruments[i];
+	if (!strcmp(voice->instrument, instrument->name)) break;
+      }
+      for (int c = 0; c < voice->n_commands; ++c) {
+	command = &voice->commands[c];
+	switch (command->type) {
+	case VOICE_COMMAND_BASE:
+	  base = number_to_double(base, command->as.base);
+	  break;
+	case VOICE_COMMAND_MODULATE:
+	  root *= number_to_double(base, command->as.modulate);
+	  break;
+	case VOICE_COMMAND_GROOVE:
+	  groove = &command->as.groove;
+	  break;
+	case VOICE_COMMAND_SECTION:
+	case VOICE_COMMAND_REPEAT:
+	case VOICE_COMMAND_CHORD:
+	  error->type = ERROR_UNIMPLEMENTED;
+	  return -1;
+	case VOICE_COMMAND_NOTE:
+	  length = SAMPLE_RATE * 60 / tempo;
+	  if (groove && groove->n_notes > 0)
+	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
+	  double freq = root * number_to_double(base, command->as.note);
+	  struct tunebook_oscillator osc =
+	    instrument->oscillators[o++ % instrument->n_oscillators];
+	  int attack = osc.attack * length;
+	  int decay = attack + (osc.decay * (double)length);
+	  int release = length;
+	  length *= 1 + osc.release;
+	  switch (osc.shape) {
+	  case OSC_SAW: f = saw; break;
+	  case OSC_TRIANGLE: f = triangle; break;
+	  case OSC_SQUARE: f = square; break;
+	  default:
+	  case OSC_SINE: f = sin; break;
+	  }
+	  for (int i = 0; i < length; ++i) {
+	    if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
+	    else fseek(out_file, -sizeof sample, SEEK_CUR);
+	    double amp = osc.volume * f(i * freq * M_PI / SAMPLE_RATE);
+	    if (i < attack) {
+	      amp *= (double)i/attack;
+	    } else if (i < decay) {
+	      double q = (double)(i-attack)/(decay-attack);
+	      amp *= 1 - (q * (1 - osc.sustain));
+	    } else if (i < release) {;
+	      amp *= osc.sustain;
+	    } else {
+	      double q = (double)(i-release)/(length-release);
+	      amp *= (1 - q) * osc.sustain;
+	    };
+	    if (amp > 1) amp = 1;
+	    if (amp < -1) amp = -1;
+	    sample += INT16_MAX * amp;
+	    fwrite(&sample, sizeof sample, 1, out_file);
+	  }
+	  fseek(out_file, (sizeof sample) * (release-length), SEEK_CUR);
+	  break;
+	case VOICE_COMMAND_REST:
+	  length = SAMPLE_RATE * 60 / tempo;
+	  if (groove && groove->n_notes > 0)
+	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
+	  for (int i = 0; i < length; ++i) {
+	    if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
+	    else fseek(out_file, -sizeof sample, SEEK_CUR);
+	    fwrite(&sample, sizeof sample, 1, out_file);
+	  }
+	  break;
+	}
+      }
+    }
+    fclose(out_file);
+    free(filename);
+  }
+  return 0;
 }
 
 int main() {
   struct tunebook_book book;
   struct tunebook_error error;
   if (tunebook_read_file(stdin, &book, &error)) goto error;
-  puts("READ FILE");
-  return 0;
-  if (tunebook_write_book(book, &error)) goto error;
+  if (tunebook_write_book(&book, &error)) goto error;
   return 0;
  error:
   tunebook_print_error(error);
