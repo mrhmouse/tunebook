@@ -409,10 +409,6 @@ int tunebook_read_file
       OSCILLATOR.volume = number_to_double(1, token.as.number);
       break;
     case TOKEN_AM:
-      if (++OSCILLATOR.n_am_targets >= s_am_targets) {
-	s_am_targets *= 2;
-	RESIZE(OSCILLATOR.am_targets, s_am_targets);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -433,10 +429,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_FM:
-      if (++OSCILLATOR.n_fm_targets >= s_fm_targets) {
-	s_fm_targets *= 2;
-	RESIZE(OSCILLATOR.fm_targets, s_fm_targets);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -457,10 +449,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_ADD:
-      if (++OSCILLATOR.n_add_targets >= s_add_targets) {
-	s_add_targets *= 2;
-	RESIZE(OSCILLATOR.add_targets, s_add_targets);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -481,10 +469,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_SUB:
-      if (++OSCILLATOR.n_sub_targets >= s_sub_targets) {
-	s_sub_targets *= 2;
-	RESIZE(OSCILLATOR.sub_targets, s_sub_targets);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -664,41 +648,84 @@ int tunebook_read_file
   return -1;
 }
 
-void write_note
-(FILE *out_file, int length, double freq, struct tunebook_oscillator *osc) {
-  int16_t sample;
+int is_modulator(struct tunebook_instrument *instrument, int o) {
+  struct tunebook_oscillator *osc = &instrument->oscillators[o];
+  return osc->n_am_targets
+    + osc->n_fm_targets
+    + osc->n_add_targets
+    + osc->n_sub_targets;
+}
+
+double amp_at_point
+(int point, int beat_length, double freq,
+ struct tunebook_instrument *instrument,
+ int o) {
   osc_fun wave_func;
-  int attack = osc->attack * length;
-  int decay = attack + (osc->decay * (double)length);
-  int release = length;
-  length *= 1 + osc->release;
+  struct tunebook_oscillator *osc = &instrument->oscillators[o];
+  int attack = osc->attack * beat_length;
+  int decay = attack + (osc->decay * (double)beat_length);
+  int release = beat_length;
+  int length = beat_length * (1 + osc->release);
   switch (osc->shape) {
   case OSC_SAW: wave_func = saw; break;
   case OSC_TRIANGLE: wave_func = triangle; break;
   case OSC_SQUARE: wave_func = square; break;
   case OSC_SINE: wave_func = sin; break;
   }
+  double fm = 0, am = 0, add = 0, sub = 0;
+  for (int i = 0; i < instrument->n_oscillators; ++i) {
+    if (i == o) continue;
+    for (int j = 0; j < instrument->oscillators[i].n_am_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].am_targets[j])) continue;
+      am += amp_at_point(point, beat_length, freq, instrument, i);
+    }
+    for (int j = 0; j < instrument->oscillators[i].n_fm_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].fm_targets[j])) continue;
+      fm += amp_at_point(point, beat_length, freq, instrument, i);
+    }
+    for (int j = 0; j < instrument->oscillators[i].n_add_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].add_targets[j])) continue;
+      add += amp_at_point(point, beat_length, freq, instrument, i);
+    }
+    for (int j = 0; j < instrument->oscillators[i].n_sub_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].sub_targets[j])) continue;
+      sub += amp_at_point(point, beat_length, freq, instrument, i);
+    }
+  }
+  freq *= osc->detune;
+  if (osc->hz) freq = osc->hz;
+  double amp = (1 + am) * osc->volume * wave_func(point * (freq * 1 + fm) * 2 * M_PI / SAMPLE_RATE);
+  amp += add;
+  amp -= sub;
+  if (point < attack) {
+    amp *= (double)point/attack;
+  } else if (point < decay) {
+    double q = (double)(point-attack)/(decay-attack);
+    amp *= 1 - (q * (1 - osc->sustain));
+  } else if (point < release) {;
+    amp *= osc->sustain;
+  } else {
+    double q = (double)(point-release)/(length-release);
+    amp *= (1 - q) * osc->sustain;
+  };
+  if (amp > 1) return 1;
+  if (amp < -1) return -1;
+  return amp;
+}
+
+void write_note
+(FILE *out_file, int beat_length, double freq,
+ struct tunebook_instrument *instrument,
+ int osc) {
+  int16_t sample;
+  int length = beat_length * (1 + instrument->oscillators[osc].release);
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
     else fseek(out_file, -sizeof sample, SEEK_CUR);
-    double amp = osc->volume * wave_func(i * freq * 2 * M_PI / SAMPLE_RATE);
-    if (i < attack) {
-      amp *= (double)i/attack;
-    } else if (i < decay) {
-      double q = (double)(i-attack)/(decay-attack);
-      amp *= 1 - (q * (1 - osc->sustain));
-    } else if (i < release) {;
-      amp *= osc->sustain;
-    } else {
-      double q = (double)(i-release)/(length-release);
-      amp *= (1 - q) * osc->sustain;
-    };
-    if (amp > 1) amp = 1;
-    if (amp < -1) amp = -1;
-    sample += INT16_MAX * amp;
+    sample += INT16_MAX * amp_at_point(i, beat_length, freq, instrument, osc);
     fwrite(&sample, sizeof sample, 1, out_file);
   }
-  fseek(out_file, (sizeof sample) * (release-length), SEEK_CUR);
+  fseek(out_file, (sizeof sample) * (beat_length-length), SEEK_CUR);
 }
 
 int tunebook_write_book
@@ -755,8 +782,8 @@ int tunebook_write_book
 	  for (int n = 0; n < command->as.chord.n_notes; ++n) {
 	    double freq = root * number_to_double(base, command->as.chord.notes[n]);
 	    int pos = ftell(out_file);
-	    write_note(out_file, length, freq,
-		       &instrument->oscillators[o++ % instrument->n_oscillators]);
+	    while (is_modulator(instrument, o)) o = (o + 1) % instrument->n_oscillators;
+	    write_note(out_file, length, freq, instrument, o++);
 	    if (n + 1 < command->as.chord.n_notes)
 	      fseek(out_file, pos, SEEK_SET);
 	  }
@@ -767,8 +794,8 @@ int tunebook_write_book
 	  if (groove && groove->n_notes > 0)
 	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
 	  double freq = root * number_to_double(base, command->as.note);
-	  write_note(out_file, length, freq,
-		     &instrument->oscillators[o++ % instrument->n_oscillators]);
+	  while (is_modulator(instrument, o)) o = (o + 1) % instrument->n_oscillators;
+	  write_note(out_file, length, freq, instrument, o++);
 	  break;
 	case VOICE_COMMAND_REST:
 	  length = SAMPLE_RATE * 60 / tempo;
