@@ -138,7 +138,7 @@ struct tunebook_error {
 double number_to_double(double base, struct tunebook_number coeffecient) {
   double c = (double)coeffecient.numerator / coeffecient.denominator;
   if (coeffecient.type == NUMBER_EXPONENTIAL) return pow(base, c);
-  else return base * c;
+  else return c;
 }
 
 void tunebook_print_error(struct tunebook_error error) {
@@ -302,6 +302,11 @@ int tunebook_read_file
 	RESIZE(VOICE.commands, s_commands);
       }
       COMMAND.type = VOICE_COMMAND_BASE;
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_NUMBER) {
+	error->type = ERROR_EXPECTED_NUMBER;
+	goto error;
+      }
       COMMAND.as.base = token.as.number;
       break;
     case TOKEN_SQUARE:
@@ -620,6 +625,11 @@ int tunebook_read_file
 	RESIZE(VOICE.commands, s_commands);
       }
       COMMAND.type = VOICE_COMMAND_REPEAT;
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_NUMBER) {
+	error->type = ERROR_EXPECTED_NUMBER;
+	goto error;
+      }
       COMMAND.as.repeat = token.as.number;
       break;
     case TOKEN_REST:
@@ -635,6 +645,11 @@ int tunebook_read_file
 	RESIZE(VOICE.commands, s_commands);
       }
       COMMAND.type = VOICE_COMMAND_MODULATE;
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_NUMBER) {
+	error->type = ERROR_EXPECTED_NUMBER;
+	goto error;
+      }
       COMMAND.as.modulate = token.as.number;
       break;
     default:
@@ -666,7 +681,7 @@ void write_note
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
     else fseek(out_file, -sizeof sample, SEEK_CUR);
-    double amp = osc->volume * wave_func(i * freq * M_PI / SAMPLE_RATE);
+    double amp = osc->volume * wave_func(i * freq * 2 * M_PI / SAMPLE_RATE);
     if (i < attack) {
       amp *= (double)i/attack;
     } else if (i < decay) {
@@ -750,7 +765,7 @@ int tunebook_write_book
 	case VOICE_COMMAND_NOTE:
 	  length = SAMPLE_RATE * 60 / tempo;
 	  if (groove && groove->n_notes > 0)
-		 length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
+	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
 	  double freq = root * number_to_double(base, command->as.note);
 	  write_note(out_file, length, freq,
 		     &instrument->oscillators[o++ % instrument->n_oscillators]);
