@@ -649,7 +649,41 @@ int tunebook_read_file
   return -1;
 }
 
-void write_note() {
+void write_note
+(FILE *out_file, int length, double freq, struct tunebook_oscillator *osc) {
+  int16_t sample;
+  osc_fun wave_func;
+  int attack = osc->attack * length;
+  int decay = attack + (osc->decay * (double)length);
+  int release = length;
+  length *= 1 + osc->release;
+  switch (osc->shape) {
+  case OSC_SAW: wave_func = saw; break;
+  case OSC_TRIANGLE: wave_func = triangle; break;
+  case OSC_SQUARE: wave_func = square; break;
+  case OSC_SINE: wave_func = sin; break;
+  }
+  for (int i = 0; i < length; ++i) {
+    if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
+    else fseek(out_file, -sizeof sample, SEEK_CUR);
+    double amp = osc->volume * wave_func(i * freq * M_PI / SAMPLE_RATE);
+    if (i < attack) {
+      amp *= (double)i/attack;
+    } else if (i < decay) {
+      double q = (double)(i-attack)/(decay-attack);
+      amp *= 1 - (q * (1 - osc->sustain));
+    } else if (i < release) {;
+      amp *= osc->sustain;
+    } else {
+      double q = (double)(i-release)/(length-release);
+      amp *= (1 - q) * osc->sustain;
+    };
+    if (amp > 1) amp = 1;
+    if (amp < -1) amp = -1;
+    sample += INT16_MAX * amp;
+    fwrite(&sample, sizeof sample, 1, out_file);
+  }
+  fseek(out_file, (sizeof sample) * (release-length), SEEK_CUR);
 }
 
 int tunebook_write_book
@@ -697,48 +731,29 @@ int tunebook_write_book
 	  break;
 	case VOICE_COMMAND_SECTION:
 	case VOICE_COMMAND_REPEAT:
-	case VOICE_COMMAND_CHORD:
 	  error->type = ERROR_UNIMPLEMENTED;
 	  return -1;
+	case VOICE_COMMAND_CHORD:
+	  length = SAMPLE_RATE * 60 / tempo;
+	  if (groove && groove->n_notes > 0)
+	    length *= number_to_double(1, groove->notes[beat % groove->n_notes]);
+	  for (int n = 0; n < command->as.chord.n_notes; ++n) {
+	    double freq = root * number_to_double(base, command->as.chord.notes[n]);
+	    int pos = ftell(out_file);
+	    write_note(out_file, length, freq,
+		       &instrument->oscillators[o++ % instrument->n_oscillators]);
+	    if (n + 1 < command->as.chord.n_notes)
+	      fseek(out_file, pos, SEEK_SET);
+	  }
+	  ++beat;
+	  break;
 	case VOICE_COMMAND_NOTE:
 	  length = SAMPLE_RATE * 60 / tempo;
 	  if (groove && groove->n_notes > 0)
-	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
+		 length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
 	  double freq = root * number_to_double(base, command->as.note);
-	  struct tunebook_oscillator osc =
-	    instrument->oscillators[o++ % instrument->n_oscillators];
-	  int attack = osc.attack * length;
-	  int decay = attack + (osc.decay * (double)length);
-	  int release = length;
-	  length *= 1 + osc.release;
-	  switch (osc.shape) {
-	  case OSC_SAW: f = saw; break;
-	  case OSC_TRIANGLE: f = triangle; break;
-	  case OSC_SQUARE: f = square; break;
-	  default:
-	  case OSC_SINE: f = sin; break;
-	  }
-	  for (int i = 0; i < length; ++i) {
-	    if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
-	    else fseek(out_file, -sizeof sample, SEEK_CUR);
-	    double amp = osc.volume * f(i * freq * M_PI / SAMPLE_RATE);
-	    if (i < attack) {
-	      amp *= (double)i/attack;
-	    } else if (i < decay) {
-	      double q = (double)(i-attack)/(decay-attack);
-	      amp *= 1 - (q * (1 - osc.sustain));
-	    } else if (i < release) {;
-	      amp *= osc.sustain;
-	    } else {
-	      double q = (double)(i-release)/(length-release);
-	      amp *= (1 - q) * osc.sustain;
-	    };
-	    if (amp > 1) amp = 1;
-	    if (amp < -1) amp = -1;
-	    sample += INT16_MAX * amp;
-	    fwrite(&sample, sizeof sample, 1, out_file);
-	  }
-	  fseek(out_file, (sizeof sample) * (release-length), SEEK_CUR);
+	  write_note(out_file, length, freq,
+		     &instrument->oscillators[o++ % instrument->n_oscillators]);
 	  break;
 	case VOICE_COMMAND_REST:
 	  length = SAMPLE_RATE * 60 / tempo;
