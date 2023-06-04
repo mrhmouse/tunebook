@@ -35,37 +35,16 @@ struct tunebook_chord {
 
 struct tunebook_token {
   enum {
-    TOKEN_ADD,
-    TOKEN_AM,
-    TOKEN_ATTACK,
-    TOKEN_BASE,
-    TOKEN_CHORD_END,
-    TOKEN_CHORD_START,
-    TOKEN_DECAY,
-    TOKEN_DETUNE,
-    TOKEN_FM,
-    TOKEN_PM,
-    TOKEN_GROOVE,
-    TOKEN_HZ,
-    TOKEN_INSTRUMENT,
-    TOKEN_MODULATE,
-    TOKEN_NUMBER,
-    TOKEN_RELEASE,
-    TOKEN_REPEAT,
-    TOKEN_REST,
-    TOKEN_ROOT,
-    TOKEN_SAW,
-    TOKEN_SECTION,
-    TOKEN_SINE,
-    TOKEN_SONG,
-    TOKEN_SQUARE,
-    TOKEN_STRING,
-    TOKEN_SUB,
-    TOKEN_SUSTAIN,
-    TOKEN_TEMPO,
-    TOKEN_TRIANGLE,
-    TOKEN_VOICE,
-    TOKEN_VOLUME,
+    TOKEN_ADD, TOKEN_AM, TOKEN_ATTACK,
+    TOKEN_BASE, TOKEN_CHORD_END, TOKEN_CHORD_START,
+    TOKEN_DECAY, TOKEN_DETUNE, TOKEN_FM, TOKEN_PM,
+    TOKEN_GROOVE, TOKEN_HZ, TOKEN_INSTRUMENT,
+    TOKEN_MODULATE, TOKEN_NUMBER, TOKEN_RELEASE,
+    TOKEN_REPEAT, TOKEN_REST, TOKEN_ROOT,
+    TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
+    TOKEN_SONG, TOKEN_SQUARE, TOKEN_STRING,
+    TOKEN_SUB, TOKEN_SUSTAIN, TOKEN_TEMPO,
+    TOKEN_TRIANGLE, TOKEN_VOICE, TOKEN_VOLUME,
   } type;
   union {
     struct tunebook_number number;
@@ -108,14 +87,10 @@ struct tunebook_voice {
 
 struct tunebook_voice_command {
   enum {
-    VOICE_COMMAND_BASE,
-    VOICE_COMMAND_NOTE,
-    VOICE_COMMAND_MODULATE,
-    VOICE_COMMAND_GROOVE,
-    VOICE_COMMAND_CHORD,
-    VOICE_COMMAND_SECTION,
-    VOICE_COMMAND_REPEAT,
-    VOICE_COMMAND_REST,
+    VOICE_COMMAND_BASE, VOICE_COMMAND_CHORD,
+    VOICE_COMMAND_GROOVE, VOICE_COMMAND_MODULATE,
+    VOICE_COMMAND_NOTE, VOICE_COMMAND_REPEAT,
+    VOICE_COMMAND_REST, VOICE_COMMAND_SECTION,
   } type;
   union {
     struct tunebook_number base, note, modulate, repeat;
@@ -125,13 +100,9 @@ struct tunebook_voice_command {
 
 struct tunebook_error {
   enum {
-    ERROR_EOF,
-    ERROR_UNIMPLEMENTED,
-    ERROR_EXPECTED_STRING,
-    ERROR_EXPECTED_NUMBER,
-    ERROR_EXPECTED_CHORD_START,
-    ERROR_UNKNOWN_INSTRUMENT,
-    ERROR_UNKNOWN_KEYWORD,
+    ERROR_EOF, ERROR_UNIMPLEMENTED, ERROR_EXPECTED_STRING,
+    ERROR_EXPECTED_NUMBER, ERROR_EXPECTED_CHORD_START,
+    ERROR_UNKNOWN_INSTRUMENT, ERROR_UNKNOWN_KEYWORD,
   } type;
   struct tunebook_token last_token;
 };
@@ -758,6 +729,81 @@ void write_note
   fseek(out_file, (sizeof sample) * (beat_length-length), SEEK_CUR);
 }
 
+struct tunebook_render_context {
+  int beat, osc, n_sections, s_sections, *sections;
+  double base, root, tempo;
+  struct tunebook_chord *groove;
+};
+
+void process_command
+(struct tunebook_render_context *cx,
+ FILE *out_file,
+ struct tunebook_instrument *instrument,
+ struct tunebook_voice *voice,
+ int n_command) {
+  int16_t sample;
+  int length;
+  struct tunebook_voice_command *command = &voice->commands[n_command];
+  switch (command->type) {
+  case VOICE_COMMAND_BASE:
+    cx->base = number_to_double(cx->base, command->as.base);
+    break;
+  case VOICE_COMMAND_MODULATE:
+    cx->root *= number_to_double(cx->base, command->as.modulate);
+    break;
+  case VOICE_COMMAND_GROOVE:
+    cx->groove = &command->as.groove;
+    cx->beat = 0;
+    break;
+  case VOICE_COMMAND_SECTION:
+    if (++cx->n_sections >= cx->s_sections) {
+      cx->s_sections *= 2;
+      RESIZE(cx->sections, cx->s_sections);
+    }
+    cx->sections[cx->n_sections-1] = n_command;
+    break;
+  case VOICE_COMMAND_REPEAT:
+    for (int r = cx->sections[cx->n_sections-1]+1; r < n_command; ++r) {
+      process_command(cx, out_file, instrument, voice, r);
+    }
+    break;
+  case VOICE_COMMAND_CHORD:
+    length = SAMPLE_RATE * 60 / cx->tempo;
+    if (cx->groove && cx->groove->n_notes > 0)
+      length *= number_to_double(1, cx->groove->notes[cx->beat % cx->groove->n_notes]);
+    int pos = ftell(out_file);
+    for (int n = 0; n < command->as.chord.n_notes; ++n) {
+      double freq = cx->root * number_to_double(cx->base, command->as.chord.notes[n]);
+      while (is_modulator(instrument, cx->osc % instrument->n_oscillators)) ++cx->osc;
+      write_note(out_file, length, freq, instrument, cx->osc % instrument->n_oscillators);
+      ++cx->osc;
+      if ((n + 1) < command->as.chord.n_notes)
+	fseek(out_file, pos, SEEK_SET);
+    }
+    ++cx->beat;
+    break;
+  case VOICE_COMMAND_NOTE:
+    length = SAMPLE_RATE * 60 / cx->tempo;
+    if (cx->groove && cx->groove->n_notes > 0)
+      length *= number_to_double(1, cx->groove->notes[cx->beat++ % cx->groove->n_notes]);
+    double freq = cx->root * number_to_double(cx->base, command->as.note);
+    while (is_modulator(instrument, cx->osc % instrument->n_oscillators)) ++cx->osc;
+    write_note(out_file, length, freq, instrument, cx->osc % instrument->n_oscillators);
+    ++cx->osc;
+    break;
+  case VOICE_COMMAND_REST:
+    length = SAMPLE_RATE * 60 / cx->tempo;
+    if (cx->groove && cx->groove->n_notes > 0)
+      length *= number_to_double(1, cx->groove->notes[cx->beat++ % cx->groove->n_notes]);
+    for (int i = 0; i < length; ++i) {
+      if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
+      else fseek(out_file, -sizeof sample, SEEK_CUR);
+      fwrite(&sample, sizeof sample, 1, out_file);
+    }
+    break;
+  }
+}
+
 int tunebook_write_book
 (struct tunebook_book *book, struct tunebook_error *error) {
   int16_t sample;
@@ -767,97 +813,52 @@ int tunebook_write_book
   struct tunebook_voice *voice;
   struct tunebook_instrument *instrument;
   struct tunebook_voice_command *command;
-  struct tunebook_chord *groove;
-  double tempo = 60, root = 440, base = 2;
   FILE *out_file;
   osc_fun f;
+  struct tunebook_render_context cx;
+  cx.s_sections = 8;
+  cx.n_sections = 0;
+  NEW(cx.sections, cx.s_sections);
   for (int s = 0 ; s < book->n_songs; ++s) {
     song = &book->songs[s];
+    cx.base = 2;
+    cx.root = 440;
+    cx.tempo = 60;
+    cx.groove = NULL;
     n_filename = 4 + strlen(song->name);
     filename = malloc(n_filename);
     strcpy(filename, song->name);
     strcpy(filename + n_filename - 4, ".l16");
     out_file = fopen(filename, "w+");
     for (int v = 0; v < song->n_voices; ++v) {
-      groove = NULL;
-      tempo = song->tempo;
-      root = song->root;
+      cx.groove = NULL;
+      cx.tempo = song->tempo;
+      cx.root = song->root;
+      cx.osc = 0;
+      cx.beat = 0;
       voice = &song->voices[v];
       fseek(out_file, 0, SEEK_SET);
-      o = beat = 0;
       for (int i = 0; i < book->n_instruments; ++i) {
 	instrument = &book->instruments[i];
 	if (!strcmp(voice->instrument, instrument->name)) break;
       }
       for (int c = 0; c < voice->n_commands; ++c) {
-	command = &voice->commands[c];
-	switch (command->type) {
-	case VOICE_COMMAND_BASE:
-	  base = number_to_double(base, command->as.base);
-	  break;
-	case VOICE_COMMAND_MODULATE:
-	  root *= number_to_double(base, command->as.modulate);
-	  break;
-	case VOICE_COMMAND_GROOVE:
-	  groove = &command->as.groove;
-	  beat = 0;
-	  break;
-	case VOICE_COMMAND_SECTION:
-	  error->type = ERROR_UNIMPLEMENTED;
-	  return -1;
-	case VOICE_COMMAND_REPEAT:
-	  error->type = ERROR_UNIMPLEMENTED;
-	  return -1;
-	case VOICE_COMMAND_CHORD:
-	  length = SAMPLE_RATE * 60 / tempo;
-	  if (groove && groove->n_notes > 0)
-	    length *= number_to_double(1, groove->notes[beat % groove->n_notes]);
-	  int pos = ftell(out_file);
-	  for (int n = 0; n < command->as.chord.n_notes; ++n) {
-	    double freq = root * number_to_double(base, command->as.chord.notes[n]);
-	    while (is_modulator(instrument, o % instrument->n_oscillators)) ++o;
-	    write_note(out_file, length, freq, instrument, o % instrument->n_oscillators);
-	    ++o;
-	    if ((n + 1) < command->as.chord.n_notes)
-	      fseek(out_file, pos, SEEK_SET);
-	  }
-	  ++beat;
-	  break;
-	case VOICE_COMMAND_NOTE:
-	  length = SAMPLE_RATE * 60 / tempo;
-	  if (groove && groove->n_notes > 0)
-	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
-	  double freq = root * number_to_double(base, command->as.note);
-	  while (is_modulator(instrument, o % instrument->n_oscillators)) ++o;
-	  write_note(out_file, length, freq, instrument, o % instrument->n_oscillators);
-	  ++o;
-	  break;
-	case VOICE_COMMAND_REST:
-	  length = SAMPLE_RATE * 60 / tempo;
-	  if (groove && groove->n_notes > 0)
-	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
-	  for (int i = 0; i < length; ++i) {
-	    if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
-	    else fseek(out_file, -sizeof sample, SEEK_CUR);
-	    fwrite(&sample, sizeof sample, 1, out_file);
-	  }
-	  break;
-	}
+	process_command(&cx, out_file, instrument, voice, c);
       }
+      fclose(out_file);
+      free(filename);
     }
-    fclose(out_file);
-    free(filename);
+    return 0;
   }
-  return 0;
 }
 
 int main() {
-  struct tunebook_book book;
-  struct tunebook_error error;
-  if (tunebook_read_file(stdin, &book, &error)) goto error;
-  if (tunebook_write_book(&book, &error)) goto error;
-  return 0;
- error:
-  tunebook_print_error(error);
-  return -1;
-}
+    struct tunebook_book book;
+    struct tunebook_error error;
+    if (tunebook_read_file(stdin, &book, &error)) goto error;
+    if (tunebook_write_book(&book, &error)) goto error;
+    return 0;
+  error:
+    tunebook_print_error(error);
+    return -1;
+  }
