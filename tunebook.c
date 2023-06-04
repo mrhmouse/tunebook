@@ -44,6 +44,7 @@ struct tunebook_token {
     TOKEN_DECAY,
     TOKEN_DETUNE,
     TOKEN_FM,
+    TOKEN_PM,
     TOKEN_GROOVE,
     TOKEN_HZ,
     TOKEN_INSTRUMENT,
@@ -82,8 +83,8 @@ struct tunebook_oscillator {
   char *name;
   enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE } shape;
   double attack, decay, sustain, release, volume, hz, detune;
-  int n_am_targets, n_fm_targets, n_add_targets, n_sub_targets;
-  char **am_targets, **fm_targets, **add_targets, **sub_targets;
+  int n_am_targets, n_fm_targets, n_pm_targets, n_add_targets, n_sub_targets;
+  char **am_targets, **fm_targets, **pm_targets, **add_targets, **sub_targets;
 };
 
 struct tunebook_song {
@@ -234,6 +235,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "hz")) token->type = TOKEN_HZ;
   else if (!strcmp(buffer, "instrument")) token->type = TOKEN_INSTRUMENT;
   else if (!strcmp(buffer, "modulate")) token->type = TOKEN_MODULATE;
+  else if (!strcmp(buffer, "pm")) token->type = TOKEN_PM;
   else if (!strcmp(buffer, "release")) token->type = TOKEN_RELEASE;
   else if (!strcmp(buffer, "repeat")) token->type = TOKEN_REPEAT;
   else if (!strcmp(buffer, "r")) token->type = TOKEN_REST;
@@ -267,7 +269,7 @@ int tunebook_read_file
   struct tunebook_token token;
   int s_instruments = 8, s_songs = 8,
     command_type, shape, s_voices, s_oscillators, s_am_targets,
-    s_fm_targets, s_add_targets, s_sub_targets, s_commands, s_notes;
+    s_fm_targets, s_pm_targets, s_add_targets, s_sub_targets, s_commands, s_notes;
 #define INSTRUMENT book->instruments[book->n_instruments-1]
 #define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
 #define SONG book->songs[book->n_songs-1]
@@ -332,15 +334,18 @@ int tunebook_read_file
       }
       s_am_targets = 2;
       s_fm_targets = 2;
+      s_pm_targets = 2;
       s_add_targets = 2;
       s_sub_targets = 2;
       OSCILLATOR.name = token.as.string;
       OSCILLATOR.n_am_targets = 0;
       OSCILLATOR.n_fm_targets = 0;
+      OSCILLATOR.n_pm_targets = 0;
       OSCILLATOR.n_add_targets = 0;
       OSCILLATOR.n_sub_targets = 0;
       NEW(OSCILLATOR.am_targets, s_am_targets);
       NEW(OSCILLATOR.fm_targets, s_fm_targets);
+      NEW(OSCILLATOR.pm_targets, s_pm_targets);
       NEW(OSCILLATOR.add_targets, s_add_targets);
       NEW(OSCILLATOR.sub_targets, s_sub_targets);
       OSCILLATOR.shape = shape;
@@ -446,6 +451,26 @@ int tunebook_read_file
 	  RESIZE(OSCILLATOR.fm_targets, s_fm_targets);
 	}
 	OSCILLATOR.fm_targets[OSCILLATOR.n_fm_targets-1] = token.as.string;
+      }
+      break;
+    case TOKEN_PM:
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_CHORD_START) {
+	error->type = ERROR_EXPECTED_CHORD_START;
+	goto error;
+      }
+      for (;;) {
+	if (tunebook_next_token(in, &token, error)) goto error;
+	if (token.type == TOKEN_CHORD_END) break;
+	if (token.type != TOKEN_STRING) {
+	  error->type = ERROR_EXPECTED_STRING;
+	  goto error;
+	}
+	if (++OSCILLATOR.n_pm_targets >= s_pm_targets) {
+	  s_pm_targets *= 2;
+	  RESIZE(OSCILLATOR.pm_targets, s_pm_targets);
+	}
+	OSCILLATOR.pm_targets[OSCILLATOR.n_pm_targets-1] = token.as.string;
       }
       break;
     case TOKEN_ADD:
@@ -573,7 +598,6 @@ int tunebook_read_file
       COMMAND.type = VOICE_COMMAND_CHORD;
       COMMAND.as.chord.n_notes = 0;
       NEW(COMMAND.as.chord.notes, s_notes);
-      if (tunebook_next_token(in, &token, error)) goto error;
       for (;;) {
 	if (tunebook_next_token(in, &token, error)) goto error;
 	if (token.type == TOKEN_CHORD_END) break;
@@ -652,6 +676,7 @@ int is_modulator(struct tunebook_instrument *instrument, int o) {
   struct tunebook_oscillator *osc = &instrument->oscillators[o];
   return osc->n_am_targets
     + osc->n_fm_targets
+    + osc->n_pm_targets
     + osc->n_add_targets
     + osc->n_sub_targets;
 }
@@ -672,7 +697,7 @@ double amp_at_point
   case OSC_SQUARE: wave_func = square; break;
   case OSC_SINE: wave_func = sin; break;
   }
-  double fm = 0, am = 0, add = 0, sub = 0;
+  double fm = 0, am = 0, pm = 0, add = 0, sub = 0;
   for (int i = 0; i < instrument->n_oscillators; ++i) {
     if (i == o) continue;
     for (int j = 0; j < instrument->oscillators[i].n_am_targets; ++j) {
@@ -682,6 +707,10 @@ double amp_at_point
     for (int j = 0; j < instrument->oscillators[i].n_fm_targets; ++j) {
       if (strcmp(osc->name, instrument->oscillators[i].fm_targets[j])) continue;
       fm += amp_at_point(point, beat_length, freq, instrument, i);
+    }
+    for (int j = 0; j < instrument->oscillators[i].n_pm_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].pm_targets[j])) continue;
+      pm += amp_at_point(point, beat_length, freq, instrument, i);
     }
     for (int j = 0; j < instrument->oscillators[i].n_add_targets; ++j) {
       if (strcmp(osc->name, instrument->oscillators[i].add_targets[j])) continue;
@@ -694,7 +723,7 @@ double amp_at_point
   }
   freq *= osc->detune;
   if (osc->hz) freq = osc->hz;
-  double amp = (1 + am) * osc->volume * wave_func(point * (freq * 1 + fm) * 2 * M_PI / SAMPLE_RATE);
+  double amp = (1 + am) * osc->volume * wave_func((point + pm) * (freq * 1 + fm) * 2 * M_PI / SAMPLE_RATE);
   amp += add;
   amp -= sub;
   if (point < attack) {
@@ -708,8 +737,6 @@ double amp_at_point
     double q = (double)(point-release)/(length-release);
     amp *= (1 - q) * osc->sustain;
   };
-  if (amp > 1) return 1;
-  if (amp < -1) return -1;
   return amp;
 }
 
@@ -722,7 +749,10 @@ void write_note
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
     else fseek(out_file, -sizeof sample, SEEK_CUR);
-    sample += INT16_MAX * amp_at_point(i, beat_length, freq, instrument, osc);
+    double amp = amp_at_point(i, beat_length, freq, instrument, osc);
+    if (amp > 1) amp = 1;
+    if (amp < -1) amp = -1;
+    sample += INT16_MAX * amp;
     fwrite(&sample, sizeof sample, 1, out_file);
   }
   fseek(out_file, (sizeof sample) * (beat_length-length), SEEK_CUR);
@@ -770,6 +800,7 @@ int tunebook_write_book
 	  break;
 	case VOICE_COMMAND_GROOVE:
 	  groove = &command->as.groove;
+	  beat = 0;
 	  break;
 	case VOICE_COMMAND_SECTION:
 	case VOICE_COMMAND_REPEAT:
@@ -779,12 +810,13 @@ int tunebook_write_book
 	  length = SAMPLE_RATE * 60 / tempo;
 	  if (groove && groove->n_notes > 0)
 	    length *= number_to_double(1, groove->notes[beat % groove->n_notes]);
+	  int pos = ftell(out_file);
 	  for (int n = 0; n < command->as.chord.n_notes; ++n) {
 	    double freq = root * number_to_double(base, command->as.chord.notes[n]);
-	    int pos = ftell(out_file);
-	    while (is_modulator(instrument, o)) o = (o + 1) % instrument->n_oscillators;
-	    write_note(out_file, length, freq, instrument, o++);
-	    if (n + 1 < command->as.chord.n_notes)
+	    while (is_modulator(instrument, o % instrument->n_oscillators)) ++o;
+	    write_note(out_file, length, freq, instrument, o % instrument->n_oscillators);
+	    ++o;
+	    if ((n + 1) < command->as.chord.n_notes)
 	      fseek(out_file, pos, SEEK_SET);
 	  }
 	  ++beat;
@@ -794,8 +826,9 @@ int tunebook_write_book
 	  if (groove && groove->n_notes > 0)
 	    length *= number_to_double(1, groove->notes[beat++ % groove->n_notes]);
 	  double freq = root * number_to_double(base, command->as.note);
-	  while (is_modulator(instrument, o)) o = (o + 1) % instrument->n_oscillators;
-	  write_note(out_file, length, freq, instrument, o++);
+	  while (is_modulator(instrument, o % instrument->n_oscillators)) ++o;
+	  write_note(out_file, length, freq, instrument, o % instrument->n_oscillators);
+	  ++o;
 	  break;
 	case VOICE_COMMAND_REST:
 	  length = SAMPLE_RATE * 60 / tempo;
