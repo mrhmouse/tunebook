@@ -803,6 +803,8 @@ int tunebook_write_book
 	  beat = 0;
 	  break;
 	case VOICE_COMMAND_SECTION:
+	  error->type = ERROR_UNIMPLEMENTED;
+	  return -1;
 	case VOICE_COMMAND_REPEAT:
 	  error->type = ERROR_UNIMPLEMENTED;
 	  return -1;

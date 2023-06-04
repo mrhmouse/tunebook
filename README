@@ -7,6 +7,10 @@ it accepts no arguments, reads from stdin,
 and writes to multiple audio files in the
 working directory
 
+ playing files
+==========================================
+ aplay -f S16_LE -r 44100 "song title.l16"
+
 
  keywords
 ==========================================
