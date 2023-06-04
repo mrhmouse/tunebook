@@ -1,0 +1,25 @@
+ tunebook
+==========================================
+this program compiles tune definitions to
+raw monophonic PCM files with 16-bit depth
+
+it accepts no arguments, reads from stdin,
+and writes to multiple audio files in the
+working directory
+
+
+ keywords
+==========================================
+ add      am         attack       base
+ decay    detune     fm           groove
+ hz       instrument modulate     pm
+ release  repeat     r            rest
+ root     saw        section      sin
+ sine     song       sqr          square
+ sub      sustain    tempo        tri
+ triangle voice      volume
+
+ syntax
+==========================================
+ ()	"word"	7\12
+ 1234	3/2	-1\2
