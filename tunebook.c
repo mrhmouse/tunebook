@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#define RANDOM_SEED 13376
+#define MAX_NOISE_STEPS 2000
 #define SAMPLE_RATE 44100
 #define NEW(target, size) target = malloc((size) * sizeof *target)
 #define RESIZE(target, size) target = realloc(target, (size) * sizeof *target)
@@ -23,6 +25,15 @@ double triangle(double i) {
   return (2 * fabs(saw(i))) - 1;
 }
 
+double noise(double i) {
+  srandom(RANDOM_SEED);
+  int n_steps = (abs(i) % MAX_NOISE_STEPS) + 1;
+  double result = 0;
+  for (int n = 0; n < n_steps; ++n)
+    result += random();
+  return sin(result);
+}
+
 struct tunebook_number {
   enum { NUMBER_RATIONAL, NUMBER_EXPONENTIAL } type;
   int numerator, denominator;
@@ -39,9 +50,9 @@ struct tunebook_token {
     TOKEN_BASE, TOKEN_CHORD_END, TOKEN_CHORD_START,
     TOKEN_DECAY, TOKEN_DETUNE, TOKEN_FM, TOKEN_PM,
     TOKEN_GROOVE, TOKEN_HZ, TOKEN_INSTRUMENT,
-    TOKEN_MODULATE, TOKEN_NUMBER, TOKEN_RELEASE,
-    TOKEN_REPEAT, TOKEN_REST, TOKEN_ROOT,
-    TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
+    TOKEN_MODULATE, TOKEN_NOISE, TOKEN_NUMBER,
+    TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
+    TOKEN_ROOT, TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
     TOKEN_SONG, TOKEN_SQUARE, TOKEN_STRING,
     TOKEN_SUB, TOKEN_SUSTAIN, TOKEN_TEMPO,
     TOKEN_TRIANGLE, TOKEN_VOICE, TOKEN_VOLUME,
@@ -60,7 +71,7 @@ struct tunebook_instrument {
 
 struct tunebook_oscillator {
   char *name;
-  enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE } shape;
+  enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE, OSC_NOISE } shape;
   double attack, decay, sustain, release, volume, hz, detune;
   int n_am_targets, n_fm_targets, n_pm_targets, n_add_targets, n_sub_targets;
   char **am_targets, **fm_targets, **pm_targets, **add_targets, **sub_targets;
@@ -206,6 +217,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "hz")) token->type = TOKEN_HZ;
   else if (!strcmp(buffer, "instrument")) token->type = TOKEN_INSTRUMENT;
   else if (!strcmp(buffer, "modulate")) token->type = TOKEN_MODULATE;
+  else if (!strcmp(buffer, "noise")) token->type = TOKEN_NOISE;
   else if (!strcmp(buffer, "pm")) token->type = TOKEN_PM;
   else if (!strcmp(buffer, "release")) token->type = TOKEN_RELEASE;
   else if (!strcmp(buffer, "repeat")) token->type = TOKEN_REPEAT;
@@ -290,6 +302,9 @@ int tunebook_read_file
       goto oscillator;
     case TOKEN_SAW:
       shape = OSC_SAW;
+      goto oscillator;
+    case TOKEN_NOISE:
+      shape = OSC_NOISE;
       goto oscillator;
     case TOKEN_SINE:
       shape = OSC_SINE;
@@ -667,6 +682,7 @@ double amp_at_point
   case OSC_TRIANGLE: wave_func = triangle; break;
   case OSC_SQUARE: wave_func = square; break;
   case OSC_SINE: wave_func = sin; break;
+  case OSC_NOISE: wave_func = noise; break;
   }
   double fm = 0, am = 0, pm = 0, add = 0, sub = 0;
   for (int i = 0; i < instrument->n_oscillators; ++i) {
@@ -742,7 +758,7 @@ void process_command
  struct tunebook_voice *voice,
  int n_command) {
   int16_t sample;
-  int length;
+  int length, current_repeat;
   struct tunebook_voice_command *command = &voice->commands[n_command];
   switch (command->type) {
   case VOICE_COMMAND_BASE:
@@ -763,7 +779,9 @@ void process_command
     cx->sections[cx->n_sections-1] = n_command;
     break;
   case VOICE_COMMAND_REPEAT:
-    for (int r = cx->sections[cx->n_sections-1]+1; r < n_command; ++r) {
+    current_repeat = cx->sections[--cx->n_sections]+1;
+    for (int n_repeat = floor(number_to_double(cx->base, command->as.repeat)); n_repeat > 0; --n_repeat)
+    for (int r = current_repeat; r < n_command; ++r) {
       process_command(cx, out_file, instrument, voice, r);
     }
     break;
@@ -819,8 +837,10 @@ int tunebook_write_book
   cx.s_sections = 8;
   cx.n_sections = 0;
   NEW(cx.sections, cx.s_sections);
+  printf("book has %i %s to render\n", book->n_songs, book->n_songs == 1 ? "song" : "songs");
   for (int s = 0 ; s < book->n_songs; ++s) {
     song = &book->songs[s];
+    printf("song %i: %s\n\tvoices: %i\n", s+1, song->name, song->n_voices);
     cx.base = 2;
     cx.root = 440;
     cx.tempo = 60;
@@ -837,19 +857,26 @@ int tunebook_write_book
       cx.osc = 0;
       cx.beat = 0;
       voice = &song->voices[v];
+      printf("\t- %s", voice->instrument);
       fseek(out_file, 0, SEEK_SET);
       for (int i = 0; i < book->n_instruments; ++i) {
 	instrument = &book->instruments[i];
 	if (!strcmp(voice->instrument, instrument->name)) break;
       }
       for (int c = 0; c < voice->n_commands; ++c) {
+	int progress = 100 * ((double)c/voice->n_commands);
+	if (progress % 10 == 0) {
+	  putchar('.');
+	  fflush(stdout);
+	}
 	process_command(&cx, out_file, instrument, voice, c);
       }
-      fclose(out_file);
-      free(filename);
+      putchar('\n');
     }
-    return 0;
+    fclose(out_file);
+    free(filename);
   }
+  return 0;
 }
 
 int main() {
