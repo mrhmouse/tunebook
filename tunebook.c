@@ -654,8 +654,46 @@ int tunebook_read_file
       goto error;
     }
   }
+  RESIZE(book->instruments, book->n_instruments);
+  RESIZE(book->songs, book->n_songs);
+  for (int i = 0; i < book->n_instruments; ++i) {
+    RESIZE(book->instruments[i].oscillators, book->instruments[i].n_oscillators);
+    for (int o = 0; o < book->instruments[i].n_oscillators; ++o) {
+      RESIZE(book->instruments[i].oscillators[o].am_targets,
+	     book->instruments[i].oscillators[o].n_am_targets);
+      RESIZE(book->instruments[i].oscillators[o].fm_targets,
+	     book->instruments[i].oscillators[o].n_fm_targets);
+      RESIZE(book->instruments[i].oscillators[o].pm_targets,
+	     book->instruments[i].oscillators[o].n_pm_targets);
+      RESIZE(book->instruments[i].oscillators[o].add_targets,
+	     book->instruments[i].oscillators[o].n_add_targets);
+      RESIZE(book->instruments[i].oscillators[o].sub_targets,
+	     book->instruments[i].oscillators[o].n_sub_targets);
+    }
+  }
+  for (int s = 0; s < book->n_songs; ++s) {
+    RESIZE(book->songs[s].voices, book->songs[s].n_voices);
+    for (int v = 0; v < book->songs[s].n_voices; ++v) {
+      RESIZE(book->songs[s].voices[v].commands,
+	     book->songs[s].voices[v].n_commands);
+      for (int c = 0; c < book->songs[s].voices[v].n_commands; ++c) {
+	switch (book->songs[s].voices[v].commands[c].type) {
+	case VOICE_COMMAND_GROOVE:
+	  RESIZE(book->songs[s].voices[v].commands[c].as.groove.notes,
+		 book->songs[s].voices[v].commands[c].as.groove.n_notes);
+	  break;
+	case VOICE_COMMAND_CHORD:
+	  RESIZE(book->songs[s].voices[v].commands[c].as.chord.notes,
+		 book->songs[s].voices[v].commands[c].as.chord.n_notes);
+	  break;
+	default:
+	  break;
+	}
+      }
+    }
+  }
+  return 0;
  error:
-  // TODO cleanup excess memory
   if (error->type == ERROR_EOF) return 0;
   return -1;
 }
