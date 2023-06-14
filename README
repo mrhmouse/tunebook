@@ -1,29 +1,257 @@
  tunebook
-==========================================
-this program compiles tune definitions to
-raw monophonic PCM files with 16-bit depth
+============================================================
+this program compiles tune definitions to raw monophonic PCM
+files with signed 16-bit depth, at a sample rate of 48kHz
 
-it accepts no arguments, reads from stdin,
-and writes to multiple audio files in the
-working directory
+it accepts no arguments, reads from stdin, and writes to
+multiple audio files in the working directory
+
+ rendering a tunebook
+------------------------------------------------------------
+ the following code will produce one raw audio file per song
+ in the tunebook defined at "your_file.txt"
+
+     tunebook < your_file.txt
 
  playing files
-==========================================
- aplay -f S16_LE -r 44100 "song title.l16"
+------------------------------------------------------------
+ the raw audio files produced are signed 16-bit depth at a
+ sample rate of 48kHz, so they can be converted first to any
+ other format, or they can be played as-is by telling your
+ audio software what the sample depth and rate are
 
-
- keywords
-==========================================
- add      am         attack       base
- decay    detune     fm           groove
- hz       instrument modulate     pm
- release  repeat     r            rest
- root     saw        section      sin
- sine     song       sqr          square
- sub      sustain    tempo        tri
- triangle voice      volume
+     aplay -f S16_LE -r 48000 "song title.l16"
 
  syntax
-==========================================
- ()	"word"	7\12
- 1234	3/2	-1\2
+============================================================
+ ()       keyword    "string"
+ 7\12	1234	3/2	-1\2
+
+ keywords are written exactly as shown
+
+ strings are enclosed in double quotes, and may contain any
+ character except for double quote; caveat that some string
+ values are used as filenames, such as song titles
+
+ numbers, which may be negative, come in three forms:
+ - integers, written in base ten
+ - fractions, written as two integers separated by the
+   slash character /
+ - exponential ratios, written as two integers separated by
+   the backslash character \
+
+ exponential ratios represent a number which is the current
+ base raised to the given fraction, e.g. 7\12 represents the
+ number 2**(7/12), which is the 12-tone perfect fifth
+
+ chords are numbers (or in special circumstances, strings)
+ which are surrounded by parentheses () and intended to be
+ played simultaneously, e.g. (1 5/4 3/2) is the 5-limit
+ major chord
+
+ keywords
+============================================================
+ add      am         attack       base
+ decay    detune     fm           groove
+ hz       instrument modulate     noise
+ pm	  release    repeat       r
+ rest	  root       saw	  section
+ sin	  sine       song         sqr
+ square	  sub        sustain      tempo
+ tri	  triangle   voice	  volume
+
+ add
+------------------------------------------------------------
+ add the current oscillator to the target oscillators, given
+ as a chord, instead of sending the oscillator to output
+
+     add ("main")
+
+ am
+------------------------------------------------------------
+ use the current oscillator as amplitude modulator for the
+ target oscillators, given as a chord, instead of sending
+ the oscillator to output
+
+     am ("main")
+
+ attack
+------------------------------------------------------------
+ set the attack time for the current oscillator to the given
+ fraction of a beat
+
+     attack 1/128
+
+ base
+------------------------------------------------------------
+ set the numerical base used for exponential fractions for
+ the current voice; defaults to 2 if not explicitly set
+
+     base 3/2
+
+ decay
+------------------------------------------------------------
+ set the decay time for the current oscillator to the given
+ fraction of a beat
+
+     decay 1/2
+
+ detune
+------------------------------------------------------------
+ set the detune modifier for the current oscillator; default
+ value is 1 if not explicitly set
+
+ fm
+------------------------------------------------------------
+ use the current oscillator as frequency modulator for the
+ target oscillators, given as a chord, instead of sending
+ the oscillator to output
+
+     fm ("main" "higher harmonics")
+
+ groove
+------------------------------------------------------------
+ set a list of beat modifiers to use as the groove for the
+ current voice; defaults to (1) if not explicitly set
+
+     groove (2/3 1/3)
+
+ hz
+------------------------------------------------------------
+ set the exact frequency of the current oscillator, ignoring
+ all note values; unused if not explicitly set
+
+     hz 60
+
+ instrument
+------------------------------------------------------------
+ start defining a new instrument, named by the given string
+
+     instrument "vaporwave strings"
+
+ modulate
+------------------------------------------------------------
+ change the root for the current voice by the given ratio
+
+     modulate 2/3
+
+ noise
+------------------------------------------------------------
+ start defining a new oscillator for the current instrument,
+ named by the given string, using a digital noise generator
+
+     noise "cymbal"
+
+ pm
+------------------------------------------------------------
+ use the current oscillator as phase modulator for the
+ target oscillators, given as a chord, instead of sending
+ the oscillator to output
+
+     pm ("main")
+
+ release
+------------------------------------------------------------
+ set the release time for the current oscillator to the
+ given fraction of a beat
+
+     release 1/3
+
+ repeat
+------------------------------------------------------------
+ repeat the current section the given number of times
+
+     repeat 3
+
+ r
+------------------------------------------------------------
+ rest
+------------------------------------------------------------
+ rest for a beat without playing anything
+
+     rest
+
+ root
+------------------------------------------------------------
+ set the root frequency for the current song
+
+     root 440
+
+ saw
+------------------------------------------------------------
+ start defining a new oscillator for the current instrument,
+ named by the given string, using a saw wave generator
+
+     saw "strings"
+
+ section
+------------------------------------------------------------
+ start a new section, which can nest within other sections
+
+     section
+
+ sin
+------------------------------------------------------------
+ sine
+------------------------------------------------------------
+ start defining a new oscillator for the current instrument,
+ named by the given string, using a sine wave generator
+
+     sine "bell"
+
+ song
+------------------------------------------------------------
+ start defining a new song, named by the given string
+
+     song "hello world"
+
+ sqr
+------------------------------------------------------------
+ square
+------------------------------------------------------------
+ start defining a new oscillator for the current instrument,
+ named by the given string, using a square wave generator
+
+     square "lead"
+
+ sub
+------------------------------------------------------------
+ subtract the current oscillator from the target oscillators
+ instead of sending the oscillator to output
+
+     sub ("main")
+
+ sustain
+------------------------------------------------------------
+ set the sustain modifier for the current oscillator
+
+     sustain 1/2
+
+ tempo
+------------------------------------------------------------
+ set the beats per minute for the current song
+
+     tempo 120
+
+ tri
+------------------------------------------------------------
+ triangle
+------------------------------------------------------------
+ start defining a new oscillator for the current instrument,
+ named by the given string, using a triangle wave generator
+
+     triangle "NES bass"
+
+ voice
+------------------------------------------------------------
+ start defining a new voice for the current song, using the
+ instrument given by the next string
+
+     voice "funk bass"
+
+ volume
+------------------------------------------------------------
+ set the volume for the current oscillator, where 1 is the
+ full amplitude available
+
+     volume 1/16
