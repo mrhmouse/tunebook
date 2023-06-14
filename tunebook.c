@@ -28,12 +28,19 @@ double triangle(double i) {
 }
 
 double noise(double i) {
-  srandom(NOISE_SEED);
+  static int n_buffer = 0;
+  static double *buffer = NULL;
+  if (!buffer) {
+    srandom(NOISE_SEED);
+    NEW(buffer, MAX_NOISE_STEPS);
+  }
   int n_steps = (abs(i) % MAX_NOISE_STEPS) + 1;
-  double result = 0;
-  for (int n = 0; n < n_steps; ++n)
-    result += random();
-  return sin(result);
+  if (n_steps >= n_buffer) {
+    double result = (n_buffer > 0) ? buffer[n_buffer - 1] : 0;
+    for (int i = n_buffer; i <= n_buffer; ++i) buffer[i] = result += random();
+    n_buffer = n_steps + 1;
+  }
+  return sin(buffer[n_steps]);
 }
 
 struct tunebook_number {
