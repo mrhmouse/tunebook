@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#define RANDOM_SEED 13376
-#define MAX_NOISE_STEPS 2000
-#define SAMPLE_RATE 44100
+#define RANDOM_SEED 0xdeadbeef
+#define SAMPLE int16_t
+#define SAMPLE_MAX INT16_MAX
+#define SAMPLE_RATE 48000
+#define MAX_NOISE_STEPS SAMPLE_RATE
 #define NEW(target, size) target = malloc((size) * sizeof *target)
 #define RESIZE(target, size) target = realloc(target, (size) * sizeof *target)
 
@@ -731,7 +733,7 @@ void write_note
 (FILE *out_file, int beat_length, double freq,
  struct tunebook_instrument *instrument,
  int osc) {
-  int16_t sample;
+  SAMPLE sample;
   int length = beat_length * (1 + instrument->oscillators[osc].release);
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
@@ -739,7 +741,7 @@ void write_note
     double amp = amp_at_point(i, beat_length, freq, instrument, osc);
     if (amp > 1) amp = 1;
     if (amp < -1) amp = -1;
-    sample += INT16_MAX * amp;
+    sample += SAMPLE_MAX * amp;
     fwrite(&sample, sizeof sample, 1, out_file);
   }
   fseek(out_file, (sizeof sample) * (beat_length-length), SEEK_CUR);
@@ -757,7 +759,7 @@ void process_command
  struct tunebook_instrument *instrument,
  struct tunebook_voice *voice,
  int n_command) {
-  int16_t sample;
+  SAMPLE sample;
   int length, current_repeat;
   struct tunebook_voice_command *command = &voice->commands[n_command];
   switch (command->type) {
@@ -781,9 +783,9 @@ void process_command
   case VOICE_COMMAND_REPEAT:
     current_repeat = cx->sections[--cx->n_sections]+1;
     for (int n_repeat = floor(number_to_double(cx->base, command->as.repeat)); n_repeat > 0; --n_repeat)
-    for (int r = current_repeat; r < n_command; ++r) {
-      process_command(cx, out_file, instrument, voice, r);
-    }
+      for (int r = current_repeat; r < n_command; ++r) {
+	process_command(cx, out_file, instrument, voice, r);
+      }
     break;
   case VOICE_COMMAND_CHORD:
     length = SAMPLE_RATE * 60 / cx->tempo;
@@ -824,7 +826,6 @@ void process_command
 
 int tunebook_write_book
 (struct tunebook_book *book, struct tunebook_error *error) {
-  int16_t sample;
   int n_filename, beat, length, o;
   char *filename;
   struct tunebook_song *song;
@@ -880,12 +881,12 @@ int tunebook_write_book
 }
 
 int main() {
-    struct tunebook_book book;
-    struct tunebook_error error;
-    if (tunebook_read_file(stdin, &book, &error)) goto error;
-    if (tunebook_write_book(&book, &error)) goto error;
-    return 0;
-  error:
-    tunebook_print_error(error);
-    return -1;
-  }
+  struct tunebook_book book;
+  struct tunebook_error error;
+  if (tunebook_read_file(stdin, &book, &error)) goto error;
+  if (tunebook_write_book(&book, &error)) goto error;
+  return 0;
+ error:
+  tunebook_print_error(error);
+  return -1;
+}
