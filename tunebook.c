@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#define RANDOM_SEED 0xdeadbeef
 #define SAMPLE int16_t
 #define SAMPLE_MAX INT16_MAX
 #define SAMPLE_RATE 48000
+#define NOISE_SEED 0xdeadbeef
 #define MAX_NOISE_STEPS SAMPLE_RATE
 #define NEW(target, size) target = malloc((size) * sizeof *target)
 #define RESIZE(target, size) target = realloc(target, (size) * sizeof *target)
@@ -28,7 +28,7 @@ double triangle(double i) {
 }
 
 double noise(double i) {
-  srandom(RANDOM_SEED);
+  srandom(NOISE_SEED);
   int n_steps = (abs(i) % MAX_NOISE_STEPS) + 1;
   double result = 0;
   for (int n = 0; n < n_steps; ++n)
@@ -253,7 +253,7 @@ int tunebook_read_file
 (FILE *in, struct tunebook_book *book, struct tunebook_error *error) {
   struct tunebook_token token;
   int s_instruments = 8, s_songs = 8,
-    command_type, shape, s_voices, s_oscillators, s_am_targets,
+    shape, s_voices, s_oscillators, s_am_targets,
     s_fm_targets, s_pm_targets, s_add_targets, s_sub_targets, s_commands, s_notes;
 #define INSTRUMENT book->instruments[book->n_instruments-1]
 #define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
@@ -671,10 +671,9 @@ int is_modulator(struct tunebook_instrument *instrument, int o) {
 
 double amp_at_point
 (int point, int beat_length, double freq,
- struct tunebook_instrument *instrument,
- int o) {
+ struct tunebook_instrument *instrument, int osc_i) {
   osc_fun wave_func;
-  struct tunebook_oscillator *osc = &instrument->oscillators[o];
+  struct tunebook_oscillator *osc = &instrument->oscillators[osc_i];
   int attack = osc->attack * beat_length;
   int decay = attack + (osc->decay * (double)beat_length);
   int release = beat_length;
@@ -688,7 +687,7 @@ double amp_at_point
   }
   double fm = 0, am = 0, pm = 0, add = 0, sub = 0;
   for (int i = 0; i < instrument->n_oscillators; ++i) {
-    if (i == o) continue;
+    if (i == osc_i) continue;
     for (int j = 0; j < instrument->oscillators[i].n_am_targets; ++j) {
       if (strcmp(osc->name, instrument->oscillators[i].am_targets[j])) continue;
       am += amp_at_point(point, beat_length, freq, instrument, i);
@@ -731,14 +730,13 @@ double amp_at_point
 
 void write_note
 (FILE *out_file, int beat_length, double freq,
- struct tunebook_instrument *instrument,
- int osc) {
+ struct tunebook_instrument *instrument, int osc_i) {
   SAMPLE sample;
-  int length = beat_length * (1 + instrument->oscillators[osc].release);
+  int length = beat_length * (1 + instrument->oscillators[osc_i].release);
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
     else fseek(out_file, -sizeof sample, SEEK_CUR);
-    double amp = amp_at_point(i, beat_length, freq, instrument, osc);
+    double amp = amp_at_point(i, beat_length, freq, instrument, osc_i);
     if (amp > 1) amp = 1;
     if (amp < -1) amp = -1;
     sample += SAMPLE_MAX * amp;
@@ -758,10 +756,10 @@ void process_command
  FILE *out_file,
  struct tunebook_instrument *instrument,
  struct tunebook_voice *voice,
- int n_command) {
+ int command_i) {
   SAMPLE sample;
   int length, current_repeat;
-  struct tunebook_voice_command *command = &voice->commands[n_command];
+  struct tunebook_voice_command *command = &voice->commands[command_i];
   switch (command->type) {
   case VOICE_COMMAND_BASE:
     cx->base = number_to_double(cx->base, command->as.base);
@@ -778,12 +776,12 @@ void process_command
       cx->s_sections *= 2;
       RESIZE(cx->sections, cx->s_sections);
     }
-    cx->sections[cx->n_sections-1] = n_command;
+    cx->sections[cx->n_sections-1] = command_i;
     break;
   case VOICE_COMMAND_REPEAT:
     current_repeat = cx->sections[--cx->n_sections]+1;
-    for (int n_repeat = floor(number_to_double(cx->base, command->as.repeat)); n_repeat > 0; --n_repeat)
-      for (int r = current_repeat; r < n_command; ++r) {
+    for (int repeat_i = floor(number_to_double(cx->base, command->as.repeat)); repeat_i > 0; --repeat_i)
+      for (int r = current_repeat; r < command_i; ++r) {
 	process_command(cx, out_file, instrument, voice, r);
       }
     break;
@@ -826,14 +824,12 @@ void process_command
 
 int tunebook_write_book
 (struct tunebook_book *book, struct tunebook_error *error) {
-  int n_filename, beat, length, o;
+  int n_filename;
   char *filename;
   struct tunebook_song *song;
   struct tunebook_voice *voice;
   struct tunebook_instrument *instrument;
-  struct tunebook_voice_command *command;
   FILE *out_file;
-  osc_fun f;
   struct tunebook_render_context cx;
   cx.s_sections = 8;
   cx.n_sections = 0;
