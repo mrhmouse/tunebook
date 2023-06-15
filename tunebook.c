@@ -121,8 +121,7 @@ struct tunebook_error {
   enum {
     ERROR_EOF, ERROR_UNIMPLEMENTED, ERROR_EXPECTED_STRING,
     ERROR_EXPECTED_NUMBER, ERROR_EXPECTED_CHORD_START,
-    ERROR_UNKNOWN_INSTRUMENT, ERROR_UNKNOWN_KEYWORD,
-    ERROR_INVALID_STATE
+    ERROR_UNKNOWN_INSTRUMENT, ERROR_UNKNOWN_KEYWORD
   } type;
   struct tunebook_token last_token;
 };
@@ -263,10 +262,6 @@ int tunebook_read_file
     shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
     s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
     s_sub_targets = 0, s_commands = 0, s_notes = 0;
-  enum {
-    STATE_TOP, STATE_INSTRUMENT, STATE_OSCILLATOR, STATE_SONG, STATE_VOICE
-  } state = STATE_TOP;
-#define REQUIRE_STATE(s)
 #define INSTRUMENT book->instruments[book->n_instruments-1]
 #define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
 #define SONG book->songs[book->n_songs-1]
@@ -280,7 +275,6 @@ int tunebook_read_file
     if (tunebook_next_token(in, &token, error)) goto error;
     switch (token.type) {
     case TOKEN_INSTRUMENT:
-      state = STATE_INSTRUMENT;
       if (++book->n_instruments >= s_instruments) {
 	s_instruments *= 2;
 	RESIZE(book->instruments, s_instruments);
@@ -297,7 +291,6 @@ int tunebook_read_file
       NEW(INSTRUMENT.oscillators, s_oscillators);
       break;
     case TOKEN_BASE:
-      REQUIRE_STATE(STATE_SONG);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
@@ -325,8 +318,6 @@ int tunebook_read_file
     case TOKEN_SINE:
       shape = OSC_SINE;
     oscillator:
-      REQUIRE_STATE(STATE_INSTRUMENT);
-      state = STATE_OSCILLATOR;
       if (++INSTRUMENT.n_oscillators >= s_oscillators) {
 	s_oscillators *= 2;
 	RESIZE(INSTRUMENT.oscillators, s_oscillators);
@@ -362,7 +353,6 @@ int tunebook_read_file
       OSCILLATOR.detune = 1;
       break;
     case TOKEN_DETUNE:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -371,7 +361,6 @@ int tunebook_read_file
       OSCILLATOR.detune = number_to_double(1, token.as.number);
       break;
     case TOKEN_HZ:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -380,7 +369,6 @@ int tunebook_read_file
       OSCILLATOR.hz = number_to_double(1, token.as.number);
       break;
     case TOKEN_ATTACK:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -389,7 +377,6 @@ int tunebook_read_file
       OSCILLATOR.attack = number_to_double(1, token.as.number);
       break;
     case TOKEN_DECAY:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -398,7 +385,6 @@ int tunebook_read_file
       OSCILLATOR.decay = number_to_double(1, token.as.number);
       break;
     case TOKEN_SUSTAIN:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -407,7 +393,6 @@ int tunebook_read_file
       OSCILLATOR.sustain = number_to_double(1, token.as.number);
       break;
     case TOKEN_RELEASE:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -416,7 +401,6 @@ int tunebook_read_file
       OSCILLATOR.release = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOLUME:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -425,7 +409,6 @@ int tunebook_read_file
       OSCILLATOR.volume = number_to_double(1, token.as.number);
       break;
     case TOKEN_AM:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -446,7 +429,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_FM:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -467,7 +449,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_PM:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -488,7 +469,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_ADD:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -509,7 +489,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_SUB:
-      REQUIRE_STATE(STATE_OSCILLATOR);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -530,7 +509,6 @@ int tunebook_read_file
       }
       break;
     case TOKEN_SONG:
-      state = STATE_SONG;
       if (++book->n_songs >= s_songs) {
 	s_songs *= 2;
 	RESIZE(book->songs, s_songs);
@@ -548,7 +526,6 @@ int tunebook_read_file
       NEW(SONG.voices, s_voices);
       break;
     case TOKEN_TEMPO:
-      REQUIRE_STATE(STATE_SONG);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -557,7 +534,6 @@ int tunebook_read_file
       SONG.tempo = number_to_double(1, token.as.number);
       break;
     case TOKEN_ROOT:
-      REQUIRE_STATE(STATE_SONG);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
@@ -566,8 +542,6 @@ int tunebook_read_file
       SONG.root = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOICE:
-      REQUIRE_STATE(STATE_SONG);
-      state = STATE_VOICE;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
 	error->type = ERROR_EXPECTED_STRING;
@@ -583,7 +557,6 @@ int tunebook_read_file
       NEW(VOICE.commands, s_commands);
       break;
     case TOKEN_GROOVE:
-      REQUIRE_STATE(STATE_VOICE);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
@@ -643,7 +616,6 @@ int tunebook_read_file
       COMMAND.as.note = token.as.number;
       break;
     case TOKEN_SECTION:
-      REQUIRE_STATE(STATE_VOICE);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
@@ -651,7 +623,6 @@ int tunebook_read_file
       COMMAND.type = VOICE_COMMAND_SECTION;
       break;
     case TOKEN_REPEAT:
-      REQUIRE_STATE(STATE_VOICE);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
@@ -665,7 +636,6 @@ int tunebook_read_file
       COMMAND.as.repeat = token.as.number;
       break;
     case TOKEN_REST:
-      REQUIRE_STATE(STATE_VOICE);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
@@ -673,7 +643,6 @@ int tunebook_read_file
       COMMAND.type = VOICE_COMMAND_REST;
       break;
     case TOKEN_MODULATE:
-      REQUIRE_STATE(STATE_VOICE);
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
 	RESIZE(VOICE.commands, s_commands);
