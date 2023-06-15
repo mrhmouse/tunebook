@@ -732,6 +732,7 @@ int tunebook_read_file
   }
   return 0;
  error:
+  error->last_token = token;
   if (error->type == ERROR_EOF) return 0;
   return -1;
 }
