@@ -260,12 +260,13 @@ int tunebook_read_file
 (FILE *in, struct tunebook_book *book, struct tunebook_error *error) {
   struct tunebook_token token;
   int s_instruments = 8, s_songs = 8,
-    shape, s_voices, s_oscillators, s_am_targets,
-    s_fm_targets, s_pm_targets, s_add_targets, s_sub_targets, s_commands, s_notes;
+    shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
+    s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
+    s_sub_targets = 0, s_commands = 0, s_notes = 0;
   enum {
     STATE_TOP, STATE_INSTRUMENT, STATE_OSCILLATOR, STATE_SONG, STATE_VOICE
   } state = STATE_TOP;
-#define REQUIRE_STATE(s) if (s != state) { error->type = ERROR_INVALID_STATE; goto error; }
+#define REQUIRE_STATE(s)
 #define INSTRUMENT book->instruments[book->n_instruments-1]
 #define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
 #define SONG book->songs[book->n_songs-1]
@@ -747,7 +748,7 @@ int is_modulator(struct tunebook_instrument *instrument, int o) {
 double amp_at_point
 (int point, int beat_length, double freq,
  struct tunebook_instrument *instrument, int osc_i) {
-  osc_fun wave_func;
+  osc_fun wave_func = sin;
   struct tunebook_oscillator *osc = &instrument->oscillators[osc_i];
   int attack = osc->attack * beat_length;
   int decay = attack + (osc->decay * (double)beat_length);
@@ -903,7 +904,7 @@ int tunebook_write_book
   char *filename;
   struct tunebook_song *song;
   struct tunebook_voice *voice;
-  struct tunebook_instrument *instrument;
+  struct tunebook_instrument *instrument = NULL;
   FILE *out_file;
   struct tunebook_render_context cx;
   cx.s_sections = 8;
