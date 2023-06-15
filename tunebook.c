@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/random.h>
 #define SAMPLE int16_t
 #define SAMPLE_MAX INT16_MAX
 #define SAMPLE_RATE 48000
@@ -27,20 +28,18 @@ double triangle(double i) {
   return (2 * fabs(saw(i))) - 1;
 }
 
+static double *noise_buffer = NULL;
 double noise(double i) {
-  static int n_buffer = 0;
-  static double *buffer = NULL;
-  if (!buffer) {
+  if (!noise_buffer) {
     srandom(NOISE_SEED);
-    NEW(buffer, MAX_NOISE_STEPS);
+    NEW(noise_buffer, MAX_NOISE_STEPS);
+    long sum = 0;
+    for (int i = 0; i < MAX_NOISE_STEPS; ++i) {
+      sum += random();
+      noise_buffer[i] = sin(sum);
+    }
   }
-  int n_steps = (abs(i) % MAX_NOISE_STEPS) + 1;
-  if (n_steps >= n_buffer) {
-    double result = (n_buffer > 0) ? buffer[n_buffer - 1] : 0;
-    for (int i = n_buffer; i <= n_buffer; ++i) buffer[i] = result += random();
-    n_buffer = n_steps + 1;
-  }
-  return sin(buffer[n_steps]);
+  return noise_buffer[abs(i) % MAX_NOISE_STEPS];
 }
 
 struct tunebook_number {
