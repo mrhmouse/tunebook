@@ -792,16 +792,18 @@ double amp_at_point
   amp += add;
   amp -= sub;
   if (point < attack) {
-    amp *= (double)point/attack;
+    if (attack) amp *= (double)point/attack;
   } else if (point < decay) {
-    double q = (double)(point-attack)/(decay-attack);
-    amp *= 1 - (q * (1 - osc->sustain));
-  } else if (point < release) {;
+    if (decay != attack) {
+      double q = (double)(point-attack)/(decay-attack);
+      amp *= 1 - (q * (1 - osc->sustain));
+    }
+  } else if (point < release) {
     amp *= osc->sustain;
   } else {
-    double q = (double)(point-release)/(length-release);
+    double q = (double)point/(length+release);
     amp *= (1 - q) * osc->sustain;
-  };
+  }
   return amp;
 }
 
