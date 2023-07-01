@@ -1,4 +1,4 @@
-CFLAGS = -g -Wall -Werror
+CFLAGS = -Wall -O3
 LIBS = -lm
 
 tunebook: tunebook.c

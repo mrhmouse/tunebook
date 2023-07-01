@@ -140,12 +140,16 @@ int tunebook_next_token
 (FILE *in, struct tunebook_token *token, struct tunebook_error *error) {
   int c, n_buffer, s_buffer, sign = 1;
   char *buffer;
+ retry:
   do c = fgetc(in); while (isspace(c));
   if (c == EOF) {
     error->type = ERROR_EOF;
     return -1;
   }
   switch (c) {
+  case '#':
+    do c = fgetc(in); while (c != '\n');
+    goto retry;
   case '(':
     token->type = TOKEN_CHORD_START;
     return 0;
