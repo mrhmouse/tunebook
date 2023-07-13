@@ -55,11 +55,11 @@ struct tunebook_chord {
 struct tunebook_token {
   enum {
     TOKEN_ADD, TOKEN_AM, TOKEN_ATTACK,
-    TOKEN_BASE, TOKEN_CHORD_END, TOKEN_CHORD_START,
-    TOKEN_DECAY, TOKEN_DETUNE, TOKEN_FM, TOKEN_PM,
-    TOKEN_GROOVE, TOKEN_HZ, TOKEN_INSTRUMENT,
-    TOKEN_MODULATE, TOKEN_NOISE, TOKEN_NUMBER,
-    TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
+    TOKEN_BASE, TOKEN_CLIP, TOKEN_CHORD_END,
+    TOKEN_CHORD_START, TOKEN_DECAY, TOKEN_DETUNE,
+    TOKEN_FM, TOKEN_PM, TOKEN_GROOVE, TOKEN_HZ,
+    TOKEN_INSTRUMENT, TOKEN_MODULATE, TOKEN_NOISE,
+    TOKEN_NUMBER, TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
     TOKEN_ROOT, TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
     TOKEN_SONG, TOKEN_SQUARE, TOKEN_STRING,
     TOKEN_SUB, TOKEN_SUSTAIN, TOKEN_TEMPO,
@@ -80,7 +80,7 @@ struct tunebook_instrument {
 struct tunebook_oscillator {
   char *name;
   enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE, OSC_NOISE } shape;
-  double attack, decay, sustain, release, volume, hz, detune;
+  double attack, decay, sustain, release, volume, hz, detune, clip;
   int n_am_targets, n_fm_targets, n_pm_targets, n_add_targets, n_sub_targets;
   char **am_targets, **fm_targets, **pm_targets, **add_targets, **sub_targets;
 };
@@ -222,6 +222,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "am")) token->type = TOKEN_AM;
   else if (!strcmp(buffer, "attack")) token->type = TOKEN_ATTACK;
   else if (!strcmp(buffer, "base")) token->type = TOKEN_BASE;
+  else if (!strcmp(buffer, "clip")) token->type = TOKEN_CLIP;
   else if (!strcmp(buffer, "decay")) token->type = TOKEN_DECAY;
   else if (!strcmp(buffer, "detune")) token->type = TOKEN_DETUNE;
   else if (!strcmp(buffer, "fm")) token->type = TOKEN_FM;
@@ -349,12 +350,21 @@ int tunebook_read_file
       NEW(OSCILLATOR.sub_targets, s_sub_targets);
       OSCILLATOR.shape = shape;
       OSCILLATOR.attack = 1.0/32.0;
+      OSCILLATOR.clip = 0;
       OSCILLATOR.decay = 1.0/3.0;
       OSCILLATOR.sustain = 3.0/4.0;
       OSCILLATOR.release = 1.0/32.0;
       OSCILLATOR.volume = 1.0/2.0;
       OSCILLATOR.hz = 0;
       OSCILLATOR.detune = 1;
+      break;
+    case TOKEN_CLIP:
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_NUMBER) {
+	error->type = ERROR_EXPECTED_NUMBER;
+	goto error;
+      }
+      OSCILLATOR.clip = number_to_double(1, token.as.number);
       break;
     case TOKEN_DETUNE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -776,6 +786,9 @@ double amp_at_point
   } else {
     double q = (double)point/(length+release);
     amp *= (1 - q) * osc->sustain;
+  }
+  if (osc->clip > 0 && fabs(amp) > osc->clip) {
+    amp = copysign(osc->clip, amp);
   }
   return amp;
 }
