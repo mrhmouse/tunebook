@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <sys/random.h>
 #define SAMPLE int16_t
 #define SAMPLE_MAX INT16_MAX
@@ -57,7 +58,7 @@ struct tunebook_token {
     TOKEN_ADD, TOKEN_AM, TOKEN_ATTACK,
     TOKEN_BASE, TOKEN_CLIP, TOKEN_CHORD_END,
     TOKEN_CHORD_START, TOKEN_DECAY, TOKEN_DETUNE,
-    TOKEN_FM, TOKEN_PM, TOKEN_GROOVE, TOKEN_HZ,
+    TOKEN_ENV, TOKEN_FM, TOKEN_PM, TOKEN_GROOVE, TOKEN_HZ,
     TOKEN_INSTRUMENT, TOKEN_MODULATE, TOKEN_NOISE,
     TOKEN_NUMBER, TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
     TOKEN_ROOT, TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
@@ -81,8 +82,8 @@ struct tunebook_oscillator {
   char *name;
   enum { OSC_SINE, OSC_SAW, OSC_TRIANGLE, OSC_SQUARE, OSC_NOISE } shape;
   double attack, decay, sustain, release, volume, hz, detune, clip;
-  int n_am_targets, n_fm_targets, n_pm_targets, n_add_targets, n_sub_targets;
-  char **am_targets, **fm_targets, **pm_targets, **add_targets, **sub_targets;
+  int n_am_targets, n_fm_targets, n_pm_targets, n_add_targets, n_sub_targets, n_env_targets;
+  char **am_targets, **fm_targets, **pm_targets, **add_targets, **sub_targets, **env_targets;
 };
 
 struct tunebook_song {
@@ -225,6 +226,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "clip")) token->type = TOKEN_CLIP;
   else if (!strcmp(buffer, "decay")) token->type = TOKEN_DECAY;
   else if (!strcmp(buffer, "detune")) token->type = TOKEN_DETUNE;
+  else if (!strcmp(buffer, "env")) token->type = TOKEN_ENV;
   else if (!strcmp(buffer, "fm")) token->type = TOKEN_FM;
   else if (!strcmp(buffer, "groove")) token->type = TOKEN_GROOVE;
   else if (!strcmp(buffer, "hz")) token->type = TOKEN_HZ;
@@ -266,7 +268,7 @@ int tunebook_read_file
   int s_instruments = 8, s_songs = 8,
     shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
     s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
-    s_sub_targets = 0, s_commands = 0, s_notes = 0;
+    s_sub_targets = 0, s_env_targets = 0, s_commands = 0, s_notes = 0;
 #define INSTRUMENT book->instruments[book->n_instruments-1]
 #define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
 #define SONG book->songs[book->n_songs-1]
@@ -337,17 +339,20 @@ int tunebook_read_file
       s_pm_targets = 2;
       s_add_targets = 2;
       s_sub_targets = 2;
+      s_env_targets = 2;
       OSCILLATOR.name = token.as.string;
       OSCILLATOR.n_am_targets = 0;
       OSCILLATOR.n_fm_targets = 0;
       OSCILLATOR.n_pm_targets = 0;
       OSCILLATOR.n_add_targets = 0;
       OSCILLATOR.n_sub_targets = 0;
+      OSCILLATOR.n_env_targets = 0;
       NEW(OSCILLATOR.am_targets, s_am_targets);
       NEW(OSCILLATOR.fm_targets, s_fm_targets);
       NEW(OSCILLATOR.pm_targets, s_pm_targets);
       NEW(OSCILLATOR.add_targets, s_add_targets);
       NEW(OSCILLATOR.sub_targets, s_sub_targets);
+      NEW(OSCILLATOR.env_targets, s_env_targets);
       OSCILLATOR.shape = shape;
       OSCILLATOR.attack = 1.0/32.0;
       OSCILLATOR.clip = 0;
@@ -373,6 +378,26 @@ int tunebook_read_file
 	goto error;
       }
       OSCILLATOR.detune = number_to_double(1, token.as.number);
+      break;
+    case TOKEN_ENV:
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_CHORD_START) {
+	error->type = ERROR_EXPECTED_CHORD_START;
+	goto error;
+      }
+      for (;;) {
+	if (tunebook_next_token(in, &token, error)) goto error;
+	if (token.type == TOKEN_CHORD_END) break;
+	if (token.type != TOKEN_STRING) {
+	  error->type = ERROR_EXPECTED_STRING;
+	  goto error;
+	}
+	if (++OSCILLATOR.n_env_targets >= s_env_targets) {
+	  s_env_targets *= 2;
+	  RESIZE(OSCILLATOR.env_targets, s_env_targets);
+	}
+	OSCILLATOR.env_targets[OSCILLATOR.n_env_targets-1] = token.as.string;
+      }
       break;
     case TOKEN_HZ:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -726,7 +751,8 @@ int is_modulator(struct tunebook_instrument *instrument, int o) {
     + osc->n_fm_targets
     + osc->n_pm_targets
     + osc->n_add_targets
-    + osc->n_sub_targets;
+    + osc->n_sub_targets
+    + osc->n_env_targets;
 }
 
 double amp_at_point
@@ -734,6 +760,7 @@ double amp_at_point
  struct tunebook_instrument *instrument, int osc_i) {
   osc_fun wave_func = sin;
   struct tunebook_oscillator *osc = &instrument->oscillators[osc_i];
+  int n_env = 0;
   int attack = osc->attack * beat_length;
   int decay = attack + (osc->decay * (double)beat_length);
   int release = beat_length;
@@ -745,7 +772,7 @@ double amp_at_point
   case OSC_SINE: wave_func = sin; break;
   case OSC_NOISE: wave_func = noise; break;
   }
-  double fm = 0, am = 0, pm = 0, add = 0, sub = 0;
+  double fm = 0, am = 0, pm = 0, add = 0, sub = 0, env = 0;
   for (int i = 0; i < instrument->n_oscillators; ++i) {
     if (i == osc_i) continue;
     for (int j = 0; j < instrument->oscillators[i].n_am_targets; ++j) {
@@ -768,12 +795,21 @@ double amp_at_point
       if (strcmp(osc->name, instrument->oscillators[i].sub_targets[j])) continue;
       sub += amp_at_point(point, beat_length, freq, instrument, i);
     }
+    for (int j = 0; j < instrument->oscillators[i].n_env_targets; ++j) {
+      if (strcmp(osc->name, instrument->oscillators[i].env_targets[j])) continue;
+      n_env++;
+      env += amp_at_point(point, beat_length, freq, instrument, i);
+    }
   }
   freq *= osc->detune;
   if (osc->hz) freq = osc->hz;
   double amp = (1 + am) * osc->volume * wave_func((point + pm) * (freq * 1 + fm) * 2 * M_PI / SAMPLE_RATE);
   amp += add;
   amp -= sub;
+  if (n_env) {
+    if (env < 0) amp = MAX(env, MIN(0, amp));
+    else amp = MIN(env, MAX(0, amp));
+  }
   if (point < attack) {
     if (attack) amp *= (double)point/attack;
   } else if (point < decay) {
