@@ -29,8 +29,8 @@
           (string-join (list "\\("
                              (string-join
                               '("add" "am" "attack" "base" "clip" "decay" "detune"
-                                "fm" "groove" "hz" "instrument" "modulate" "noise"
-                                "pm" "release" "repeat" "rest" "root" "r" "saw"
+                                "env" "fm" "groove" "hz" "instrument" "legato" "modulate"
+                                "noise" "pm" "release" "repeat" "rest" "root" "r" "saw"
                                 "section"  "sine" "sin" "song" "sqr" "square" "sub"
                                 "sustain" "tempo" "triangle" "tri" "voice" "volume")
                               "\\|")

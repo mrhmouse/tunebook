@@ -59,7 +59,7 @@ struct tunebook_token {
     TOKEN_BASE, TOKEN_CLIP, TOKEN_CHORD_END,
     TOKEN_CHORD_START, TOKEN_DECAY, TOKEN_DETUNE,
     TOKEN_ENV, TOKEN_FM, TOKEN_PM, TOKEN_GROOVE, TOKEN_HZ,
-    TOKEN_INSTRUMENT, TOKEN_MODULATE, TOKEN_NOISE,
+    TOKEN_INSTRUMENT, TOKEN_LEGATO, TOKEN_MODULATE, TOKEN_NOISE,
     TOKEN_NUMBER, TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
     TOKEN_ROOT, TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
     TOKEN_SONG, TOKEN_SQUARE, TOKEN_STRING,
@@ -108,12 +108,13 @@ struct tunebook_voice {
 struct tunebook_voice_command {
   enum {
     VOICE_COMMAND_BASE, VOICE_COMMAND_CHORD,
-    VOICE_COMMAND_GROOVE, VOICE_COMMAND_MODULATE,
-    VOICE_COMMAND_NOTE, VOICE_COMMAND_REPEAT,
-    VOICE_COMMAND_REST, VOICE_COMMAND_SECTION,
+    VOICE_COMMAND_GROOVE, VOICE_COMMAND_LEGATO,
+    VOICE_COMMAND_MODULATE, VOICE_COMMAND_NOTE,
+    VOICE_COMMAND_REPEAT, VOICE_COMMAND_REST,
+    VOICE_COMMAND_SECTION,
   } type;
   union {
-    struct tunebook_number base, note, modulate, repeat;
+    struct tunebook_number base, note, modulate, repeat, legato;
     struct tunebook_chord groove, chord;
   } as;
 };
@@ -231,6 +232,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "groove")) token->type = TOKEN_GROOVE;
   else if (!strcmp(buffer, "hz")) token->type = TOKEN_HZ;
   else if (!strcmp(buffer, "instrument")) token->type = TOKEN_INSTRUMENT;
+  else if (!strcmp(buffer, "legato")) token->type = TOKEN_LEGATO;
   else if (!strcmp(buffer, "modulate")) token->type = TOKEN_MODULATE;
   else if (!strcmp(buffer, "noise")) token->type = TOKEN_NOISE;
   else if (!strcmp(buffer, "pm")) token->type = TOKEN_PM;
@@ -681,6 +683,19 @@ int tunebook_read_file
       }
       COMMAND.type = VOICE_COMMAND_REST;
       break;
+    case TOKEN_LEGATO:
+      if (++VOICE.n_commands >= s_commands) {
+	s_commands *= 2;
+	RESIZE(VOICE.commands, s_commands);
+      }
+      COMMAND.type = VOICE_COMMAND_LEGATO;
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_NUMBER) {
+	error->type = ERROR_EXPECTED_NUMBER;
+	goto error;
+      }
+      COMMAND.as.legato = token.as.number;
+      break;
     case TOKEN_MODULATE:
       if (++VOICE.n_commands >= s_commands) {
 	s_commands *= 2;
@@ -830,13 +845,23 @@ double amp_at_point
 }
 
 void write_note
-(FILE *out_file, int beat_length, double freq,
+(FILE *out_file, int beat_length,
+ double legato, double prev_freq, double targ_freq,
  struct tunebook_instrument *instrument, int osc_i) {
   SAMPLE sample;
   int length = beat_length * (1 + instrument->oscillators[osc_i].release);
+  int legato_end = floor(beat_length * legato);
+  double diff_freq = targ_freq - prev_freq;
   for (int i = 0; i < length; ++i) {
     if (0 == fread(&sample, sizeof sample, 1, out_file)) sample = 0;
     else fseek(out_file, -sizeof sample, SEEK_CUR);
+    double freq;
+    if (i >= legato_end || prev_freq == 0) freq = targ_freq;
+    else {
+      double p = ((float)i)/((float)legato_end);
+      double t = 1 - pow(1 - p, 3);
+      freq = prev_freq + (diff_freq * t);
+    }
     double amp = amp_at_point(i, beat_length, freq, instrument, osc_i);
     if (amp > 1) amp = 1;
     if (amp < -1) amp = -1;
@@ -848,9 +873,24 @@ void write_note
 
 struct tunebook_render_context {
   int beat, osc, n_sections, s_sections, *sections;
-  double base, root, tempo;
+  double base, root, tempo, legato;
   struct tunebook_chord *groove;
+  struct tunebook_voice_command *last_freq_command;
 };
+
+double previous_frequency(struct tunebook_render_context *cx, int chord_n) {
+  // TODO handle base/modulate/other commands that change our basis
+  if (!cx->last_freq_command) return 0;
+  switch (cx->last_freq_command->type) {
+  case VOICE_COMMAND_CHORD:
+    if (chord_n >= cx->last_freq_command->as.chord.n_notes) return 0;
+    return cx->root * number_to_double(cx->base, cx->last_freq_command->as.chord.notes[chord_n]);
+  case VOICE_COMMAND_NOTE:
+    return cx->root * number_to_double(cx->base, cx->last_freq_command->as.note);
+  default:
+    return 0;
+  }
+}
 
 void process_command
 (struct tunebook_render_context *cx,
@@ -861,9 +901,13 @@ void process_command
   SAMPLE sample;
   int length, current_repeat;
   struct tunebook_voice_command *command = &voice->commands[command_i];
+  int pos = ftell(out_file);
   switch (command->type) {
   case VOICE_COMMAND_BASE:
     cx->base = number_to_double(cx->base, command->as.base);
+    break;
+  case VOICE_COMMAND_LEGATO:
+    cx->legato = number_to_double(cx->base, command->as.legato);
     break;
   case VOICE_COMMAND_MODULATE:
     cx->root *= number_to_double(cx->base, command->as.modulate);
@@ -890,25 +934,28 @@ void process_command
     length = SAMPLE_RATE * 60 / cx->tempo;
     if (cx->groove && cx->groove->n_notes > 0)
       length *= number_to_double(1, cx->groove->notes[cx->beat % cx->groove->n_notes]);
-    int pos = ftell(out_file);
     for (int n = 0; n < command->as.chord.n_notes; ++n) {
-      double freq = cx->root * number_to_double(cx->base, command->as.chord.notes[n]);
+      double prev_freq = previous_frequency(cx, n);
+      double targ_freq = cx->root * number_to_double(cx->base, command->as.chord.notes[n]);
       while (is_modulator(instrument, cx->osc % instrument->n_oscillators)) ++cx->osc;
-      write_note(out_file, length, freq, instrument, cx->osc % instrument->n_oscillators);
+      write_note(out_file, length, cx->legato, prev_freq, targ_freq, instrument, cx->osc % instrument->n_oscillators);
       ++cx->osc;
       if ((n + 1) < command->as.chord.n_notes)
 	fseek(out_file, pos, SEEK_SET);
     }
     ++cx->beat;
+    cx->last_freq_command = command;
     break;
   case VOICE_COMMAND_NOTE:
     length = SAMPLE_RATE * 60 / cx->tempo;
     if (cx->groove && cx->groove->n_notes > 0)
       length *= number_to_double(1, cx->groove->notes[cx->beat++ % cx->groove->n_notes]);
-    double freq = cx->root * number_to_double(cx->base, command->as.note);
+    double prev_freq = previous_frequency(cx, 0);
+    double targ_freq = cx->root * number_to_double(cx->base, command->as.note);
     while (is_modulator(instrument, cx->osc % instrument->n_oscillators)) ++cx->osc;
-    write_note(out_file, length, freq, instrument, cx->osc % instrument->n_oscillators);
+    write_note(out_file, length, cx->legato, prev_freq, targ_freq, instrument, cx->osc % instrument->n_oscillators);
     ++cx->osc;
+    cx->last_freq_command = command;
     break;
   case VOICE_COMMAND_REST:
     length = SAMPLE_RATE * 60 / cx->tempo;
@@ -939,10 +986,6 @@ int tunebook_write_book
   for (int s = 0 ; s < book->n_songs; ++s) {
     song = &book->songs[s];
     printf("song %i: %s\n\tvoices: %i\n", s+1, song->name, song->n_voices);
-    cx.base = 2;
-    cx.root = 440;
-    cx.tempo = 60;
-    cx.groove = NULL;
     n_filename = 4 + strlen(song->name);
     filename = malloc(n_filename);
     strcpy(filename, song->name);
@@ -950,10 +993,13 @@ int tunebook_write_book
     out_file = fopen(filename, "w+");
     for (int v = 0; v < song->n_voices; ++v) {
       cx.groove = NULL;
+      cx.last_freq_command = NULL;
+      cx.base = 2;
       cx.tempo = song->tempo;
       cx.root = song->root;
       cx.osc = 0;
       cx.beat = 0;
+      cx.legato = 0;
       voice = &song->voices[v];
       printf("\t- %s", voice->instrument);
       fseek(out_file, 0, SEEK_SET);
