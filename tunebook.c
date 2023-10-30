@@ -308,11 +308,11 @@ int tunebook_include_file
   int shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
     s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
     s_sub_targets = 0, s_env_targets = 0, s_commands = 0, s_notes = 0;
-#define INSTRUMENT book->instruments[book->n_instruments-1]
-#define OSCILLATOR INSTRUMENT.oscillators[INSTRUMENT.n_oscillators-1]
-#define SONG book->songs[book->n_songs-1]
-#define VOICE SONG.voices[SONG.n_voices-1]
-#define COMMAND VOICE.commands[VOICE.n_commands-1]
+  struct tunebook_instrument *instrument = NULL;
+  struct tunebook_oscillator *oscillator = NULL;
+  struct tunebook_song *song = NULL;
+  struct tunebook_voice *voice = NULL;
+  struct tunebook_voice_command *command = NULL;
   for (;;) {
     if (tunebook_next_token(in, &token, error)) goto error;
     switch (token.type) {
@@ -331,33 +331,35 @@ int tunebook_include_file
         goto error;
       break;
     case TOKEN_INSTRUMENT:
-      if (++book->n_instruments >= *s_instruments) {
-	*s_instruments *= 2;
-	RESIZE(book->instruments, *s_instruments);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
+      if (++book->n_instruments >= *s_instruments) {
+	*s_instruments *= 2;
+	RESIZE(book->instruments, *s_instruments);
+      }
       s_oscillators = 4;
       shape = OSC_SINE;
-      INSTRUMENT.name = token.as.string;
-      INSTRUMENT.n_oscillators = 0;
-      NEW(INSTRUMENT.oscillators, s_oscillators);
+      instrument = &book->instruments[book->n_instruments-1];
+      instrument->name = token.as.string;
+      instrument->n_oscillators = 0;
+      NEW(instrument->oscillators, s_oscillators);
       break;
     case TOKEN_BASE:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_BASE;
+      command = &voice->commands[voice->n_commands-1];
+      command->type = VOICE_COMMAND_BASE;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      COMMAND.as.base = token.as.number;
+      command->as.base = token.as.number;
       break;
     case TOKEN_SQUARE:
       shape = OSC_SQUARE;
@@ -374,43 +376,44 @@ int tunebook_include_file
     case TOKEN_SINE:
       shape = OSC_SINE;
     oscillator:
-      if (++INSTRUMENT.n_oscillators >= s_oscillators) {
-	s_oscillators *= 2;
-	RESIZE(INSTRUMENT.oscillators, s_oscillators);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
+      if (++instrument->n_oscillators >= s_oscillators) {
+	s_oscillators *= 2;
+	RESIZE(instrument->oscillators, s_oscillators);
+      }
+      oscillator = &instrument->oscillators[instrument->n_oscillators-1];
       s_am_targets = 2;
       s_fm_targets = 2;
       s_pm_targets = 2;
       s_add_targets = 2;
       s_sub_targets = 2;
       s_env_targets = 2;
-      OSCILLATOR.name = token.as.string;
-      OSCILLATOR.n_am_targets = 0;
-      OSCILLATOR.n_fm_targets = 0;
-      OSCILLATOR.n_pm_targets = 0;
-      OSCILLATOR.n_add_targets = 0;
-      OSCILLATOR.n_sub_targets = 0;
-      OSCILLATOR.n_env_targets = 0;
-      NEW(OSCILLATOR.am_targets, s_am_targets);
-      NEW(OSCILLATOR.fm_targets, s_fm_targets);
-      NEW(OSCILLATOR.pm_targets, s_pm_targets);
-      NEW(OSCILLATOR.add_targets, s_add_targets);
-      NEW(OSCILLATOR.sub_targets, s_sub_targets);
-      NEW(OSCILLATOR.env_targets, s_env_targets);
-      OSCILLATOR.shape = shape;
-      OSCILLATOR.attack = 1.0/32.0;
-      OSCILLATOR.clip = 0;
-      OSCILLATOR.decay = 1.0/3.0;
-      OSCILLATOR.sustain = 3.0/4.0;
-      OSCILLATOR.release = 1.0/32.0;
-      OSCILLATOR.volume = 1.0/2.0;
-      OSCILLATOR.hz = 0;
-      OSCILLATOR.detune = 1;
+      oscillator->name = token.as.string;
+      oscillator->n_am_targets = 0;
+      oscillator->n_fm_targets = 0;
+      oscillator->n_pm_targets = 0;
+      oscillator->n_add_targets = 0;
+      oscillator->n_sub_targets = 0;
+      oscillator->n_env_targets = 0;
+      NEW(oscillator->am_targets, s_am_targets);
+      NEW(oscillator->fm_targets, s_fm_targets);
+      NEW(oscillator->pm_targets, s_pm_targets);
+      NEW(oscillator->add_targets, s_add_targets);
+      NEW(oscillator->sub_targets, s_sub_targets);
+      NEW(oscillator->env_targets, s_env_targets);
+      oscillator->shape = shape;
+      oscillator->attack = 1.0/32.0;
+      oscillator->clip = 0;
+      oscillator->decay = 1.0/3.0;
+      oscillator->sustain = 3.0/4.0;
+      oscillator->release = 1.0/32.0;
+      oscillator->volume = 1.0/2.0;
+      oscillator->hz = 0;
+      oscillator->detune = 1;
       break;
     case TOKEN_CLIP:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -418,7 +421,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.clip = number_to_double(1, token.as.number);
+      oscillator->clip = number_to_double(1, token.as.number);
       break;
     case TOKEN_DETUNE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -426,7 +429,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.detune = number_to_double(1, token.as.number);
+      oscillator->detune = number_to_double(1, token.as.number);
       break;
     case TOKEN_ENV:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -441,11 +444,11 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_env_targets >= s_env_targets) {
+	if (++oscillator->n_env_targets >= s_env_targets) {
 	  s_env_targets *= 2;
-	  RESIZE(OSCILLATOR.env_targets, s_env_targets);
+	  RESIZE(oscillator->env_targets, s_env_targets);
 	}
-	OSCILLATOR.env_targets[OSCILLATOR.n_env_targets-1] = token.as.string;
+	oscillator->env_targets[oscillator->n_env_targets-1] = token.as.string;
       }
       break;
     case TOKEN_HZ:
@@ -454,7 +457,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.hz = number_to_double(1, token.as.number);
+      oscillator->hz = number_to_double(1, token.as.number);
       break;
     case TOKEN_ATTACK:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -462,7 +465,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.attack = number_to_double(1, token.as.number);
+      oscillator->attack = number_to_double(1, token.as.number);
       break;
     case TOKEN_DECAY:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -470,7 +473,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.decay = number_to_double(1, token.as.number);
+      oscillator->decay = number_to_double(1, token.as.number);
       break;
     case TOKEN_SUSTAIN:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -478,7 +481,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.sustain = number_to_double(1, token.as.number);
+      oscillator->sustain = number_to_double(1, token.as.number);
       break;
     case TOKEN_RELEASE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -486,7 +489,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.release = number_to_double(1, token.as.number);
+      oscillator->release = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOLUME:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -494,7 +497,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      OSCILLATOR.volume = number_to_double(1, token.as.number);
+      oscillator->volume = number_to_double(1, token.as.number);
       break;
     case TOKEN_AM:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -509,11 +512,11 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_am_targets >= s_am_targets) {
+	if (++oscillator->n_am_targets >= s_am_targets) {
 	  s_am_targets *= 2;
-	  RESIZE(OSCILLATOR.am_targets, s_am_targets);
+	  RESIZE(oscillator->am_targets, s_am_targets);
 	}
-	OSCILLATOR.am_targets[OSCILLATOR.n_am_targets-1] = token.as.string;
+	oscillator->am_targets[oscillator->n_am_targets-1] = token.as.string;
       }
       break;
     case TOKEN_FM:
@@ -529,11 +532,11 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_fm_targets >= s_fm_targets) {
+	if (++oscillator->n_fm_targets >= s_fm_targets) {
 	  s_fm_targets *= 2;
-	  RESIZE(OSCILLATOR.fm_targets, s_fm_targets);
+	  RESIZE(oscillator->fm_targets, s_fm_targets);
 	}
-	OSCILLATOR.fm_targets[OSCILLATOR.n_fm_targets-1] = token.as.string;
+	oscillator->fm_targets[oscillator->n_fm_targets-1] = token.as.string;
       }
       break;
     case TOKEN_PM:
@@ -549,11 +552,11 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_pm_targets >= s_pm_targets) {
+	if (++oscillator->n_pm_targets >= s_pm_targets) {
 	  s_pm_targets *= 2;
-	  RESIZE(OSCILLATOR.pm_targets, s_pm_targets);
+	  RESIZE(oscillator->pm_targets, s_pm_targets);
 	}
-	OSCILLATOR.pm_targets[OSCILLATOR.n_pm_targets-1] = token.as.string;
+	oscillator->pm_targets[oscillator->n_pm_targets-1] = token.as.string;
       }
       break;
     case TOKEN_ADD:
@@ -569,11 +572,11 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_add_targets >= s_add_targets) {
+	if (++oscillator->n_add_targets >= s_add_targets) {
 	  s_add_targets *= 2;
-	  RESIZE(OSCILLATOR.add_targets, s_add_targets);
+	  RESIZE(oscillator->add_targets, s_add_targets);
 	}
-	OSCILLATOR.add_targets[OSCILLATOR.n_add_targets-1] = token.as.string;
+	oscillator->add_targets[oscillator->n_add_targets-1] = token.as.string;
       }
       break;
     case TOKEN_SUB:
@@ -589,29 +592,30 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_STRING;
 	  goto error;
 	}
-	if (++OSCILLATOR.n_sub_targets >= s_sub_targets) {
+	if (++oscillator->n_sub_targets >= s_sub_targets) {
 	  s_sub_targets *= 2;
-	  RESIZE(OSCILLATOR.sub_targets, s_sub_targets);
+	  RESIZE(oscillator->sub_targets, s_sub_targets);
 	}
-	OSCILLATOR.sub_targets[OSCILLATOR.n_sub_targets-1] = token.as.string;
+	oscillator->sub_targets[oscillator->n_sub_targets-1] = token.as.string;
       }
       break;
     case TOKEN_SONG:
-      if (++book->n_songs >= *s_songs) {
-	*s_songs *= 2;
-	RESIZE(book->songs, *s_songs);
-      }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
+      if (++book->n_songs >= *s_songs) {
+	*s_songs *= 2;
+	RESIZE(book->songs, *s_songs);
+      }
+      song = &book->songs[book->n_songs-1];
       s_voices = 8;
-      SONG.name = token.as.string;
-      SONG.tempo = 60;
-      SONG.root = 440;
-      SONG.n_voices = 0;
-      NEW(SONG.voices, s_voices);
+      song->name = token.as.string;
+      song->tempo = 60;
+      song->root = 440;
+      song->n_voices = 0;
+      NEW(song->voices, s_voices);
       break;
     case TOKEN_TEMPO:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -619,7 +623,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      SONG.tempo = number_to_double(1, token.as.number);
+      song->tempo = number_to_double(1, token.as.number);
       break;
     case TOKEN_ROOT:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -627,7 +631,7 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      SONG.root = number_to_double(1, token.as.number);
+      song->root = number_to_double(1, token.as.number);
       break;
     case TOKEN_VOICE:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -635,24 +639,25 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
-      if (++SONG.n_voices >= s_voices) {
+      if (++song->n_voices >= s_voices) {
 	s_voices *= 2;
-	RESIZE(SONG.voices, s_voices);
+	RESIZE(song->voices, s_voices);
       }
+      voice = &song->voices[song->n_voices-1];
       s_commands = 32;
-      VOICE.instrument = token.as.string;
-      VOICE.n_commands = 0;
-      NEW(VOICE.commands, s_commands);
+      voice->instrument = token.as.string;
+      voice->n_commands = 0;
+      NEW(voice->commands, s_commands);
       break;
     case TOKEN_GROOVE:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
       s_notes = 4;
-      COMMAND.type = VOICE_COMMAND_GROOVE;
-      COMMAND.as.groove.n_notes = 0;
-      NEW(COMMAND.as.groove.notes, s_notes);
+      command->type = VOICE_COMMAND_GROOVE;
+      command->as.groove.n_notes = 0;
+      NEW(command->as.groove.notes, s_notes);
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_CHORD_START) {
 	error->type = ERROR_EXPECTED_CHORD_START;
@@ -665,22 +670,22 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_NUMBER;
 	  goto error;
 	}
-	if (++COMMAND.as.groove.n_notes >= s_notes) {
+	if (++command->as.groove.n_notes >= s_notes) {
 	  s_notes *= 2;
-	  RESIZE(COMMAND.as.groove.notes, s_notes);
+	  RESIZE(command->as.groove.notes, s_notes);
 	}
-	COMMAND.as.groove.notes[COMMAND.as.groove.n_notes-1] = token.as.number;
+	command->as.groove.notes[command->as.groove.n_notes-1] = token.as.number;
       }
       break;
     case TOKEN_CHORD_START:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
       s_notes = 4;
-      COMMAND.type = VOICE_COMMAND_CHORD;
-      COMMAND.as.chord.n_notes = 0;
-      NEW(COMMAND.as.chord.notes, s_notes);
+      command->type = VOICE_COMMAND_CHORD;
+      command->as.chord.n_notes = 0;
+      NEW(command->as.chord.notes, s_notes);
       for (;;) {
 	if (tunebook_next_token(in, &token, error)) goto error;
 	if (token.type == TOKEN_CHORD_END) break;
@@ -688,73 +693,73 @@ int tunebook_include_file
 	  error->type = ERROR_EXPECTED_NUMBER;
 	  goto error;
 	}
-	if (++COMMAND.as.chord.n_notes >= s_notes) {
+	if (++command->as.chord.n_notes >= s_notes) {
 	  s_notes *= 2;
-	  RESIZE(COMMAND.as.chord.notes, s_notes);
+	  RESIZE(command->as.chord.notes, s_notes);
 	}
-	COMMAND.as.chord.notes[COMMAND.as.chord.n_notes-1] = token.as.number;
+	command->as.chord.notes[command->as.chord.n_notes-1] = token.as.number;
       }
       break;
     case TOKEN_NUMBER:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_NOTE;
-      COMMAND.as.note = token.as.number;
+      command->type = VOICE_COMMAND_NOTE;
+      command->as.note = token.as.number;
       break;
     case TOKEN_SECTION:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_SECTION;
+      command->type = VOICE_COMMAND_SECTION;
       break;
     case TOKEN_REPEAT:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_REPEAT;
+      command->type = VOICE_COMMAND_REPEAT;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      COMMAND.as.repeat = token.as.number;
+      command->as.repeat = token.as.number;
       break;
     case TOKEN_REST:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_REST;
+      command->type = VOICE_COMMAND_REST;
       break;
     case TOKEN_LEGATO:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_LEGATO;
+      command->type = VOICE_COMMAND_LEGATO;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      COMMAND.as.legato = token.as.number;
+      command->as.legato = token.as.number;
       break;
     case TOKEN_MODULATE:
-      if (++VOICE.n_commands >= s_commands) {
+      if (++voice->n_commands >= s_commands) {
 	s_commands *= 2;
-	RESIZE(VOICE.commands, s_commands);
+	RESIZE(voice->commands, s_commands);
       }
-      COMMAND.type = VOICE_COMMAND_MODULATE;
+      command->type = VOICE_COMMAND_MODULATE;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
 	error->type = ERROR_EXPECTED_NUMBER;
 	goto error;
       }
-      COMMAND.as.modulate = token.as.number;
+      command->as.modulate = token.as.number;
       break;
     default:
       error->type = ERROR_UNIMPLEMENTED;
