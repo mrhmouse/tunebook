@@ -305,7 +305,7 @@ int tunebook_include_file
  int *s_instruments, int *s_songs) {
   FILE *included;
   struct tunebook_token token;
-  int shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
+  int shape, i = 0, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
     s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
     s_sub_targets = 0, s_env_targets = 0, s_commands = 0, s_notes = 0;
   struct tunebook_instrument *instrument = NULL;
@@ -336,16 +336,23 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
-      if (++book->n_instruments >= *s_instruments) {
-	*s_instruments *= 2;
-	RESIZE(book->instruments, *s_instruments);
+      for (i = 0; i < book->n_instruments; ++i) {
+        if (!strcmp(token.as.string, book->instruments[i].name)) break;
       }
-      s_oscillators = 4;
-      shape = OSC_SINE;
-      instrument = &book->instruments[book->n_instruments-1];
-      instrument->name = token.as.string;
-      instrument->n_oscillators = 0;
-      NEW(instrument->oscillators, s_oscillators);
+      if (i == book->n_instruments) {
+        if (++book->n_instruments >= *s_instruments) {
+          *s_instruments *= 2;
+          RESIZE(book->instruments, *s_instruments);
+        }
+        instrument = &book->instruments[book->n_instruments-1];
+        s_oscillators = 4;
+        instrument->name = token.as.string;
+        instrument->n_oscillators = 0;
+        NEW(instrument->oscillators, s_oscillators);
+      } else {
+        instrument = &book->instruments[i];
+        s_oscillators = instrument->n_oscillators;
+      }
       break;
     case TOKEN_BASE:
       if (++voice->n_commands >= s_commands) {
@@ -381,39 +388,53 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
-      if (++instrument->n_oscillators >= s_oscillators) {
-	s_oscillators *= 2;
-	RESIZE(instrument->oscillators, s_oscillators);
+      for (i = 0; i < instrument->n_oscillators; ++i) {
+        if (!strcmp(token.as.string, instrument->oscillators[i].name)) break;
       }
-      oscillator = &instrument->oscillators[instrument->n_oscillators-1];
-      s_am_targets = 2;
-      s_fm_targets = 2;
-      s_pm_targets = 2;
-      s_add_targets = 2;
-      s_sub_targets = 2;
-      s_env_targets = 2;
-      oscillator->name = token.as.string;
-      oscillator->n_am_targets = 0;
-      oscillator->n_fm_targets = 0;
-      oscillator->n_pm_targets = 0;
-      oscillator->n_add_targets = 0;
-      oscillator->n_sub_targets = 0;
-      oscillator->n_env_targets = 0;
-      NEW(oscillator->am_targets, s_am_targets);
-      NEW(oscillator->fm_targets, s_fm_targets);
-      NEW(oscillator->pm_targets, s_pm_targets);
-      NEW(oscillator->add_targets, s_add_targets);
-      NEW(oscillator->sub_targets, s_sub_targets);
-      NEW(oscillator->env_targets, s_env_targets);
-      oscillator->shape = shape;
-      oscillator->attack = 1.0/32.0;
-      oscillator->clip = 0;
-      oscillator->decay = 1.0/3.0;
-      oscillator->sustain = 3.0/4.0;
-      oscillator->release = 1.0/32.0;
-      oscillator->volume = 1.0/2.0;
-      oscillator->hz = 0;
-      oscillator->detune = 1;
+      if (i == instrument->n_oscillators) {
+        if (++instrument->n_oscillators >= s_oscillators) {
+          s_oscillators *= 2;
+          RESIZE(instrument->oscillators, s_oscillators);
+        }
+        oscillator = &instrument->oscillators[instrument->n_oscillators-1];
+        s_am_targets = 2;
+        s_fm_targets = 2;
+        s_pm_targets = 2;
+        s_add_targets = 2;
+        s_sub_targets = 2;
+        s_env_targets = 2;
+        oscillator->name = token.as.string;
+        oscillator->n_am_targets = 0;
+        oscillator->n_fm_targets = 0;
+        oscillator->n_pm_targets = 0;
+        oscillator->n_add_targets = 0;
+        oscillator->n_sub_targets = 0;
+        oscillator->n_env_targets = 0;
+        NEW(oscillator->am_targets, s_am_targets);
+        NEW(oscillator->fm_targets, s_fm_targets);
+        NEW(oscillator->pm_targets, s_pm_targets);
+        NEW(oscillator->add_targets, s_add_targets);
+        NEW(oscillator->sub_targets, s_sub_targets);
+        NEW(oscillator->env_targets, s_env_targets);
+        oscillator->shape = shape;
+        oscillator->attack = 1.0/32.0;
+        oscillator->clip = 0;
+        oscillator->decay = 1.0/3.0;
+        oscillator->sustain = 3.0/4.0;
+        oscillator->release = 1.0/32.0;
+        oscillator->volume = 1.0/2.0;
+        oscillator->hz = 0;
+        oscillator->detune = 1;
+      } else {
+        oscillator = &instrument->oscillators[i];
+        oscillator->shape = shape;
+        s_am_targets = oscillator->n_am_targets;
+        s_fm_targets = oscillator->n_fm_targets;
+        s_pm_targets = oscillator->n_pm_targets;
+        s_add_targets = oscillator->n_add_targets;
+        s_sub_targets = oscillator->n_sub_targets;
+        s_env_targets = oscillator->n_env_targets;
+      }
       break;
     case TOKEN_CLIP:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -605,17 +626,25 @@ int tunebook_include_file
 	error->type = ERROR_EXPECTED_STRING;
 	goto error;
       }
-      if (++book->n_songs >= *s_songs) {
-	*s_songs *= 2;
-	RESIZE(book->songs, *s_songs);
+      for (i = 0; i < book->n_songs; ++i) {
+        if (!strcmp(token.as.string, book->songs[i].name)) break;
       }
-      song = &book->songs[book->n_songs-1];
-      s_voices = 8;
-      song->name = token.as.string;
-      song->tempo = 60;
-      song->root = 440;
-      song->n_voices = 0;
-      NEW(song->voices, s_voices);
+      if (i == book->n_songs) {
+        if (++book->n_songs >= *s_songs) {
+          *s_songs *= 2;
+          RESIZE(book->songs, *s_songs);
+        }
+        song = &book->songs[book->n_songs-1];
+        s_voices = 8;
+        song->name = token.as.string;
+        song->tempo = 60;
+        song->root = 440;
+        song->n_voices = 0;
+        NEW(song->voices, s_voices);
+      } else {
+        song = &book->songs[i];
+        s_voices = song->n_voices;
+      }
       break;
     case TOKEN_TEMPO:
       if (tunebook_next_token(in, &token, error)) goto error;
@@ -654,6 +683,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       s_notes = 4;
       command->type = VOICE_COMMAND_GROOVE;
       command->as.groove.n_notes = 0;
@@ -682,6 +712,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       s_notes = 4;
       command->type = VOICE_COMMAND_CHORD;
       command->as.chord.n_notes = 0;
@@ -705,6 +736,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_NOTE;
       command->as.note = token.as.number;
       break;
@@ -713,6 +745,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_SECTION;
       break;
     case TOKEN_REPEAT:
@@ -720,6 +753,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_REPEAT;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
@@ -733,6 +767,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_REST;
       break;
     case TOKEN_LEGATO:
@@ -740,6 +775,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_LEGATO;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {
@@ -753,6 +789,7 @@ int tunebook_include_file
 	s_commands *= 2;
 	RESIZE(voice->commands, s_commands);
       }
+      command = &voice->commands[voice->n_commands-1];
       command->type = VOICE_COMMAND_MODULATE;
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_NUMBER) {

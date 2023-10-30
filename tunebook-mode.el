@@ -26,15 +26,17 @@
 (defvar tunebook-font-lock-keywords
   (let ((keywords
          (cons
-          (string-join (list "\\("
-                             (string-join
-                              '("add" "am" "attack" "base" "clip" "decay" "detune"
-                                "env" "fm" "groove" "hz" "instrument" "legato" "modulate"
-                                "noise" "pm" "release" "repeat" "rest" "root" "r" "saw"
-                                "section"  "sine" "sin" "song" "sqr" "square" "sub"
-                                "sustain" "tempo" "triangle" "tri" "voice" "volume")
-                              "\\|")
-                             "\\)"))
+          (string-join
+           (list "\\("
+                 (string-join
+                  '("add" "am" "attack" "base" "clip" "decay" "detune"
+                    "env" "fm" "groove" "hz" "instrument" "include"
+                    "legato" "modulate" "noise" "pm" "release" "repeat"
+                    "rest" "root" "r" "saw" "section"  "sine" "sin"
+                    "song" "sqr" "square" "sub" "sustain" "tempo"
+                    "triangle" "tri" "voice" "volume")
+                  "\\|")
+                 "\\)"))
           'font-lock-keyword-face)))
     (cons keywords
           '(("\\d+" . font-lock-constant-face)
