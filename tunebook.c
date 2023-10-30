@@ -55,16 +55,42 @@ struct tunebook_chord {
 
 struct tunebook_token {
   enum {
-    TOKEN_ADD, TOKEN_AM, TOKEN_ATTACK,
-    TOKEN_BASE, TOKEN_CLIP, TOKEN_CHORD_END,
-    TOKEN_CHORD_START, TOKEN_DECAY, TOKEN_DETUNE,
-    TOKEN_ENV, TOKEN_FM, TOKEN_PM, TOKEN_GROOVE, TOKEN_HZ,
-    TOKEN_INSTRUMENT, TOKEN_LEGATO, TOKEN_MODULATE, TOKEN_NOISE,
-    TOKEN_NUMBER, TOKEN_RELEASE, TOKEN_REPEAT, TOKEN_REST,
-    TOKEN_ROOT, TOKEN_SAW, TOKEN_SECTION, TOKEN_SINE,
-    TOKEN_SONG, TOKEN_SQUARE, TOKEN_STRING,
-    TOKEN_SUB, TOKEN_SUSTAIN, TOKEN_TEMPO,
-    TOKEN_TRIANGLE, TOKEN_VOICE, TOKEN_VOLUME,
+    TOKEN_ADD,
+    TOKEN_AM,
+    TOKEN_ATTACK,
+    TOKEN_BASE,
+    TOKEN_CHORD_END,
+    TOKEN_CHORD_START,
+    TOKEN_CLIP,
+    TOKEN_DECAY,
+    TOKEN_DETUNE,
+    TOKEN_ENV,
+    TOKEN_FM,
+    TOKEN_GROOVE,
+    TOKEN_HZ,
+    TOKEN_INCLUDE,
+    TOKEN_INSTRUMENT,
+    TOKEN_LEGATO,
+    TOKEN_MODULATE,
+    TOKEN_NOISE,
+    TOKEN_NUMBER,
+    TOKEN_PM,
+    TOKEN_RELEASE,
+    TOKEN_REPEAT,
+    TOKEN_REST,
+    TOKEN_ROOT,
+    TOKEN_SAW,
+    TOKEN_SECTION,
+    TOKEN_SINE,
+    TOKEN_SONG,
+    TOKEN_SQUARE,
+    TOKEN_STRING,
+    TOKEN_SUB,
+    TOKEN_SUSTAIN,
+    TOKEN_TEMPO,
+    TOKEN_TRIANGLE,
+    TOKEN_VOICE,
+    TOKEN_VOLUME,
   } type;
   union {
     struct tunebook_number number;
@@ -107,10 +133,14 @@ struct tunebook_voice {
 
 struct tunebook_voice_command {
   enum {
-    VOICE_COMMAND_BASE, VOICE_COMMAND_CHORD,
-    VOICE_COMMAND_GROOVE, VOICE_COMMAND_LEGATO,
-    VOICE_COMMAND_MODULATE, VOICE_COMMAND_NOTE,
-    VOICE_COMMAND_REPEAT, VOICE_COMMAND_REST,
+    VOICE_COMMAND_BASE,
+    VOICE_COMMAND_CHORD,
+    VOICE_COMMAND_GROOVE,
+    VOICE_COMMAND_LEGATO,
+    VOICE_COMMAND_MODULATE,
+    VOICE_COMMAND_NOTE,
+    VOICE_COMMAND_REPEAT,
+    VOICE_COMMAND_REST,
     VOICE_COMMAND_SECTION,
   } type;
   union {
@@ -121,9 +151,14 @@ struct tunebook_voice_command {
 
 struct tunebook_error {
   enum {
-    ERROR_EOF, ERROR_UNIMPLEMENTED, ERROR_EXPECTED_STRING,
-    ERROR_EXPECTED_NUMBER, ERROR_EXPECTED_CHORD_START,
-    ERROR_UNKNOWN_INSTRUMENT, ERROR_UNKNOWN_KEYWORD
+    ERROR_EOF,
+    ERROR_EXPECTED_CHORD_START,
+    ERROR_EXPECTED_NUMBER,
+    ERROR_EXPECTED_STRING,
+    ERROR_FILE_NOT_FOUND,
+    ERROR_UNIMPLEMENTED,
+    ERROR_UNKNOWN_INSTRUMENT,
+    ERROR_UNKNOWN_KEYWORD,
   } type;
   struct tunebook_token last_token;
 };
@@ -232,6 +267,7 @@ int tunebook_next_token
   else if (!strcmp(buffer, "groove")) token->type = TOKEN_GROOVE;
   else if (!strcmp(buffer, "hz")) token->type = TOKEN_HZ;
   else if (!strcmp(buffer, "instrument")) token->type = TOKEN_INSTRUMENT;
+  else if (!strcmp(buffer, "include")) token->type = TOKEN_INCLUDE;
   else if (!strcmp(buffer, "legato")) token->type = TOKEN_LEGATO;
   else if (!strcmp(buffer, "modulate")) token->type = TOKEN_MODULATE;
   else if (!strcmp(buffer, "noise")) token->type = TOKEN_NOISE;
@@ -264,11 +300,12 @@ int tunebook_next_token
   return 0;
 }
 
-int tunebook_read_file
-(FILE *in, struct tunebook_book *book, struct tunebook_error *error) {
+int tunebook_include_file
+(FILE *in, struct tunebook_book *book, struct tunebook_error *error,
+ int *s_instruments, int *s_songs) {
+  FILE *included;
   struct tunebook_token token;
-  int s_instruments = 8, s_songs = 8,
-    shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
+  int shape, s_voices = 0, s_oscillators = 0, s_am_targets = 0,
     s_fm_targets = 0, s_pm_targets = 0, s_add_targets = 0,
     s_sub_targets = 0, s_env_targets = 0, s_commands = 0, s_notes = 0;
 #define INSTRUMENT book->instruments[book->n_instruments-1]
@@ -276,17 +313,27 @@ int tunebook_read_file
 #define SONG book->songs[book->n_songs-1]
 #define VOICE SONG.voices[SONG.n_voices-1]
 #define COMMAND VOICE.commands[VOICE.n_commands-1]
-  book->n_instruments = 0;
-  book->n_songs = 0;
-  NEW(book->instruments, s_instruments);
-  NEW(book->songs, s_songs);
   for (;;) {
     if (tunebook_next_token(in, &token, error)) goto error;
     switch (token.type) {
+    case TOKEN_INCLUDE:
+      if (tunebook_next_token(in, &token, error)) goto error;
+      if (token.type != TOKEN_STRING) {
+	error->type = ERROR_EXPECTED_STRING;
+	goto error;
+      }
+      included = fopen(token.as.string, "r");
+      if (!included) {
+        error->type = ERROR_FILE_NOT_FOUND;
+        goto error;
+      }
+      if (tunebook_include_file(included, book, error, s_instruments, s_songs))
+        goto error;
+      break;
     case TOKEN_INSTRUMENT:
-      if (++book->n_instruments >= s_instruments) {
-	s_instruments *= 2;
-	RESIZE(book->instruments, s_instruments);
+      if (++book->n_instruments >= *s_instruments) {
+	*s_instruments *= 2;
+	RESIZE(book->instruments, *s_instruments);
       }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
@@ -550,9 +597,9 @@ int tunebook_read_file
       }
       break;
     case TOKEN_SONG:
-      if (++book->n_songs >= s_songs) {
-	s_songs *= 2;
-	RESIZE(book->songs, s_songs);
+      if (++book->n_songs >= *s_songs) {
+	*s_songs *= 2;
+	RESIZE(book->songs, *s_songs);
       }
       if (tunebook_next_token(in, &token, error)) goto error;
       if (token.type != TOKEN_STRING) {
@@ -758,6 +805,17 @@ int tunebook_read_file
   error->last_token = token;
   if (error->type == ERROR_EOF) return 0;
   return -1;
+}
+
+int tunebook_read_file
+(FILE *in, struct tunebook_book *book, struct tunebook_error *error) {
+  int s_instruments = 8;
+  int s_songs = 8;
+  book->n_instruments = 0;
+  book->n_songs = 0;
+  NEW(book->instruments, s_instruments);
+  NEW(book->songs, s_songs);
+  return tunebook_include_file(in, book, error, &s_instruments, &s_songs);
 }
 
 int is_modulator(struct tunebook_instrument *instrument, int o) {
