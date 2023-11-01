@@ -878,8 +878,6 @@ double amp_at_point
   int n_env = 0;
   int attack = osc->attack * beat_length;
   int decay = attack + (osc->decay * (double)beat_length);
-  int release = beat_length;
-  int length = beat_length * (1 + osc->release);
   switch (osc->shape) {
   case OSC_SAW: wave_func = saw; break;
   case OSC_TRIANGLE: wave_func = triangle; break;
@@ -932,11 +930,16 @@ double amp_at_point
       double q = (double)(point-attack)/(decay-attack);
       amp *= 1 - (q * (1 - osc->sustain));
     }
-  } else if (point < release) {
+  } else if (point < beat_length) {
     amp *= osc->sustain;
   } else {
-    double q = (double)point/(length+release);
-    amp *= (1 - q) * osc->sustain;
+    int release_end = beat_length * osc->release;
+    if (release_end <= 0) {
+      amp = 0;
+    } else {
+      double q = (double)(point - beat_length)/release_end;
+      amp *= (1 - q) * osc->sustain;
+    }
   }
   if (osc->clip > 0 && fabs(amp) > osc->clip) {
     amp = copysign(osc->clip, amp);
