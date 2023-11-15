@@ -250,7 +250,7 @@ int tunebook_next_token
   buffer[0] = c;
   for (;;) {
     c = fgetc(in);
-    if (isspace(c)) break;
+    if (isspace(c) || c == EOF) break;
     if (++n_buffer >= s_buffer) {
       s_buffer *= 2;
       RESIZE(buffer, s_buffer);
